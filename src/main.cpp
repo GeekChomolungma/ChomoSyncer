@@ -1,25 +1,23 @@
 #include <hiredis/hiredis.h>
+#include "dataSync/exBinance.h"
 #include <iostream>
+#include <thread>
+#include <atomic>
+#include <chrono>
+
+std::atomic<bool> keepRunning{ true };
 
 int main() {
-    // reids connection
-    redisContext *c = redisConnect("127.0.0.1", 6379);
-    if (c == nullptr || c->err) {
-        if (c) {
-            std::cerr << "Connection error: " << c->errstr << std::endl;
-            redisFree(c);
-        } else {
-            std::cerr << "Connection error: can't allocate redis context" << std::endl;
-        }
-        return 1;
-    }
+    BinanceDataSync binanceDataSync;
 
-    // tst connection
-    redisReply *reply = (redisReply *)redisCommand(c, "PING");
-    std::cout << "PING: " << reply->str << std::endl;
-    freeReplyObject(reply);
+    std::thread prodThread(std::bind(&BinanceDataSync::handle_market_data, &binanceDataSync));
+    std::thread consThread(std::bind(&BinanceDataSync::handle_rest_operations, &binanceDataSync));
 
-    // disconnect
-    redisFree(c);
+    std::this_thread::sleep_for(std::chrono::seconds(10)); // Let it run for 10 seconds
+    keepRunning = false;
+
+    prodThread.join();
+    consThread.join();
+
     return 0;
 }
