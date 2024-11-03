@@ -8,7 +8,8 @@
 std::atomic<bool> keepRunning{ true };
 
 int main() {
-    BinanceDataSync binanceDataSync;
+    // init redis, localhost and default port
+    BinanceDataSync binanceDataSync("localhost", 6379);
 
     std::thread prodThread(std::bind(&BinanceDataSync::handle_market_data, &binanceDataSync));
     std::thread consThread(std::bind(&BinanceDataSync::handle_rest_operations, &binanceDataSync));

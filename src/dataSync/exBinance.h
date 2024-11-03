@@ -11,6 +11,8 @@
 #include <boost/beast/websocket.hpp>
 #include <boost/beast/ssl.hpp>
 
+#include "db/marketDataStreamManager.h"
+
 using tcp = boost::asio::ip::tcp;
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -20,7 +22,7 @@ namespace net = boost::asio;
 // Class for handling Binance data synchronization
 class BinanceDataSync {
 public:
-    BinanceDataSync() : last_persist_time(std::chrono::steady_clock::now()), ioc_(), resolver_(ioc_), ssl_ctx_(net::ssl::context::tlsv12_client) {}
+    BinanceDataSync(const std::string& redisHost, int redisPort) : last_persist_time(std::chrono::steady_clock::now()), ioc_(), resolver_(ioc_), ssl_ctx_(net::ssl::context::tlsv12_client), mkdsm(redisHost, redisPort) {}
 
     void handle_market_data() {
         try {
@@ -59,13 +61,8 @@ public:
                 std::string message = beast::buffers_to_string(buffer.data());
 
                 // Process the received market data
-                std::cout << "Market data: " << message << std::endl;
-
-                //{
-                //    std::lock_guard<std::mutex> lock(data_mtx);
-                //    market_data_queue.push(message);
-                //}
-                //data_cv.notify_one();
+                // std::cout << "Market data: " << message << std::endl;
+                this->mkdsm.publishMarketData(symbol, timeframe, message);
             }
 
         } catch (const std::exception &e) {
@@ -76,25 +73,10 @@ public:
 
     void handle_data_persistence() {
         while (true) {
-            std::unique_lock<std::mutex> lock(persist_mtx);
-            data_cv.wait_for(lock, BATCH_TIMEOUT, [this] { return !market_data_queue.empty(); });
-
-            while (!market_data_queue.empty()) {
-                data_cache.push_back(market_data_queue.front());
-                market_data_queue.pop();
-            }
-            lock.unlock();
-
-            // Trigger batch persistence if cache reaches the batch size or timeout
-            auto now = std::chrono::steady_clock::now();
-            if (data_cache.size() >= BATCH_SIZE || (now - last_persist_time) >= BATCH_TIMEOUT) {
-                if (!data_cache.empty()) {
-                    // Simulate database write operation
-                    std::cout << "Persisting " << data_cache.size() << " data points to the database." << std::endl;
-                    data_cache.clear();
-                    last_persist_time = now;
-                }
-            }
+            std::string symbol = "btcusdt";
+            std::string timeframe = "kline_15m";
+            this->mkdsm.persistData();
+            this->mkdsm.consumeData(symbol, timeframe, "consumer1");
         }
     }
     
@@ -168,15 +150,17 @@ public:
     }
 
 private:
-    std::mutex data_mtx, signal_mtx, persist_mtx;
-    std::condition_variable data_cv, signal_cv;
-    std::queue<std::string> market_data_queue;
-    std::queue<std::string> trade_signals;
-    std::vector<std::string> data_cache;
+    MarketDataStreamManager mkdsm;
+
     std::chrono::steady_clock::time_point last_persist_time;
     const size_t BATCH_SIZE = 100;
     const std::chrono::seconds BATCH_TIMEOUT = std::chrono::seconds(2);
     net::io_context ioc_;
     tcp::resolver resolver_;
     net::ssl::context ssl_ctx_;
+
+    // rest operations
+    std::mutex signal_mtx;
+    std::condition_variable signal_cv;
+    std::queue<std::string> trade_signals;
 };

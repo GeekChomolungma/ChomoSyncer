@@ -5,6 +5,11 @@ MarketDataStreamManager::MarketDataStreamManager(const std::string& redisHost, i
     connectToRedis();
 }
 
+// MarketDataStreamManager Destructor
+MarketDataStreamManager::~MarketDataStreamManager() {
+    disconnectFromRedis();
+}
+
 // Data Publishing Methods
 void MarketDataStreamManager::publishMarketData(const std::string& asset, const std::string& timeframe, const std::string& data) {
     if (redisContextProducer) {
@@ -20,17 +25,35 @@ void MarketDataStreamManager::publishMarketData(const std::string& asset, const 
 
 // Data Consumption Methods
 std::string MarketDataStreamManager::consumeData(const std::string& asset, const std::string& timeframe, const std::string& consumerName) {
+    // Example reply format from XREADGROUP command:
+    // [
+    //     ["stream1", [["1680859830574-0", ["data", "Hello World"]]]],
+    //     ["stream2", [["1680859830575-0", ["data", "Another Message"]]]]
+    // ]
+
+
+    
     if (redisContextConsumer) {
+        // Create the consumer group
         std::string streamName = asset + "-" + timeframe + "-stream";
-        redisReply* reply = (redisReply*)redisCommand(redisContextConsumer, "XREADGROUP GROUP %s %s STREAMS %s >", (asset + "-group").c_str(), consumerName.c_str(), streamName.c_str());
+        std::string groupName = asset + "-group";
+        
+        // Execute the XGROUP CREATE command
+        redisReply* reply = (redisReply*)redisCommand(redisContextConsumer,
+            "XGROUP CREATE %s %s $ MKSTREAM", streamName.c_str(), groupName.c_str());
+
+        redisReply* reply = (redisReply*)redisCommand(redisContextConsumer, "XREADGROUP GROUP %s %s STREAMS %s >", groupName.c_str(), consumerName.c_str(), streamName.c_str());
         if (reply != nullptr && reply->type == REDIS_REPLY_ARRAY && reply->elements > 0) {
             redisReply* messages = reply->element[0]->element[1];
             if (messages->type == REDIS_REPLY_ARRAY && messages->elements > 0) {
-                redisReply* message = messages->element[0];
-                std::string messageId = message->element[0]->str;
-                std::string messageData = message->element[1]->element[1]->str;
+                for (size_t i = 0; i < messages->elements; ++i) {
+                    redisReply* message = messages->element[i];
+                    std::string messageId = message->element[0]->str;
+                    std::string messageData = message->element[1]->element[1]->str;
+
+                }
                 freeReplyObject(reply);
-                return messageData;
+                return "";
             }
         }
         if (reply) freeReplyObject(reply);
