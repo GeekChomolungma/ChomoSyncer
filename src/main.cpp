@@ -10,15 +10,15 @@ std::atomic<bool> keepRunning{ true };
 int main() {
     // init redis, localhost and default port
     BinanceDataSync binanceDataSync("localhost", 6379);
+    binanceDataSync.start();
+    //std::thread prodThread(std::bind(&BinanceDataSync::handle_market_data, &binanceDataSync));
+    //std::thread consThread(std::bind(&BinanceDataSync::handle_rest_operations, &binanceDataSync));
 
-    std::thread prodThread(std::bind(&BinanceDataSync::handle_market_data, &binanceDataSync));
-    std::thread consThread(std::bind(&BinanceDataSync::handle_rest_operations, &binanceDataSync));
+    //std::this_thread::sleep_for(std::chrono::seconds(10)); // Let it run for 10 seconds
+    //keepRunning = false;
 
-    std::this_thread::sleep_for(std::chrono::seconds(10)); // Let it run for 10 seconds
-    keepRunning = false;
-
-    prodThread.join();
-    consThread.join();
+    //prodThread.join();
+    //consThread.join();
 
     return 0;
 }

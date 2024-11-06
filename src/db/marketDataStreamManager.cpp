@@ -1,5 +1,8 @@
 #include "db/marketDataStreamManager.h"
 
+std::string GLOBAL_KLINES_STREAM = "global_klines_stream";
+std::string GLOBAL_KLINES_GROUP = "global_klines_group";
+
 // MarketDataStreamManager Constructor
 MarketDataStreamManager::MarketDataStreamManager(const std::string& redisHost, int redisPort) : redisHost(redisHost), redisPort(redisPort), redisContextProducer(nullptr), redisContextConsumer(nullptr) {
     connectToRedis();
@@ -11,10 +14,21 @@ MarketDataStreamManager::~MarketDataStreamManager() {
 }
 
 // Data Publishing Methods
-void MarketDataStreamManager::publishMarketData(const std::string& asset, const std::string& timeframe, const std::string& data) {
+void MarketDataStreamManager::publishGlobalKlines(const std::string& data) {
     if (redisContextProducer) {
+        redisReply* reply = (redisReply*)redisCommand(redisContextProducer, "XADD %s * data %s", GLOBAL_KLINES_STREAM.c_str(), data.c_str());
+        if (reply == nullptr) {
+            std::cerr << "Failed to publish data to stream: " << GLOBAL_KLINES_STREAM << std::endl;
+        } else {
+            freeReplyObject(reply);
+        }
+    }
+}
+
+void MarketDataStreamManager::publishMarketData(const std::string& asset, const std::string& timeframe, const std::string& data) {
+    if (redisContextConsumer) {
         std::string streamName = asset + "-" + timeframe + "-stream";
-        redisReply* reply = (redisReply*)redisCommand(redisContextProducer, "XADD %s * data %s", streamName.c_str(), data.c_str());
+        redisReply* reply = (redisReply*)redisCommand(redisContextConsumer, "XADD %s * data %s", streamName.c_str(), data.c_str());
         if (reply == nullptr) {
             std::cerr << "Failed to publish data to stream: " << streamName << std::endl;
         } else {
@@ -24,15 +38,66 @@ void MarketDataStreamManager::publishMarketData(const std::string& asset, const 
 }
 
 // Data Consumption Methods
+std::string MarketDataStreamManager::fetchGlobalKlinesAndDispatch(const std::string& consumerName) {
+    // Execute the XGROUP CREATE command
+    redisReply* reply = (redisReply*)redisCommand(redisContextConsumer,
+        "XGROUP CREATE %s %s $ MKSTREAM", GLOBAL_KLINES_STREAM.c_str(), GLOBAL_KLINES_GROUP.c_str());
+    if (reply != nullptr) {
+        freeReplyObject(reply);
+    }
+
+    reply = (redisReply*)redisCommand(redisContextConsumer, "XREADGROUP GROUP %s %s STREAMS %s >", GLOBAL_KLINES_GROUP.c_str(), consumerName.c_str(), GLOBAL_KLINES_STREAM.c_str());
+    if (reply != nullptr && reply->type == REDIS_REPLY_ARRAY && reply->elements > 0) {
+        redisReply* messages = reply->element[0]->element[1]; // reply->element[0]->element[0] is the stream name
+        if (messages->type == REDIS_REPLY_ARRAY && messages->elements > 0) {
+            for (size_t i = 0; i < messages->elements; ++i) {
+                redisReply* message = messages->element[i];
+                std::string messageId = message->element[0]->str;
+                std::string messageData = message->element[1]->element[1]->str;
+                std::cout << "fetchGlobalKlines data: " << messageData << std::endl;
+
+                // step 0: json parse and ack 0th message
+                nlohmann::json j;
+                try {
+                    j = nlohmann::json::parse(messageData);
+                    // first resp maybe like {"result":null,"id":1}
+                    auto result = j.find("result");
+                    if (result != j.end() && result->is_null()) {
+                        continue;
+                    }
+                    redisCommand(redisContextConsumer, "XACK %s %s %s", GLOBAL_KLINES_STREAM.c_str(), GLOBAL_KLINES_GROUP.c_str(), messageId.c_str());
+                } catch (const std::exception& e) {
+                    std::cerr << "Error deserializing message: " << e.what() << std::endl;
+                    return "";
+                }
+
+                // step 1: deserialize from json
+                KlineResponse kline; 
+                try
+                {
+                    kline = KlineResponse::deserializeFromJson(j);
+                }
+                catch(const std::exception& e)
+                {
+                    std::cerr << e.what() << '\n';
+                    return "";
+                }  
+                
+                // step 2: persistence to mongo
+
+                // step 3: publish to asset-timeframe stream
+                std::cout << "Publishing to asset-timeframe:" << kline.Symbol << "-" << kline.Interval << "-stream" << std::endl;
+                publishMarketData(kline.Symbol, kline.Interval, messageData);
+            }
+            freeReplyObject(reply);
+            return "";
+        }
+    }
+    if (reply) freeReplyObject(reply);
+    return "";
+}
+
 std::string MarketDataStreamManager::consumeData(const std::string& asset, const std::string& timeframe, const std::string& consumerName) {
-    // Example reply format from XREADGROUP command:
-    // [
-    //     ["stream1", [["1680859830574-0", ["data", "Hello World"]]]],
-    //     ["stream2", [["1680859830575-0", ["data", "Another Message"]]]]
-    // ]
-
-
-    
     if (redisContextConsumer) {
         // Create the consumer group
         std::string streamName = asset + "-" + timeframe + "-stream";
@@ -41,8 +106,11 @@ std::string MarketDataStreamManager::consumeData(const std::string& asset, const
         // Execute the XGROUP CREATE command
         redisReply* reply = (redisReply*)redisCommand(redisContextConsumer,
             "XGROUP CREATE %s %s $ MKSTREAM", streamName.c_str(), groupName.c_str());
+        if (reply != nullptr) {
+            freeReplyObject(reply);
+        }
 
-        redisReply* reply = (redisReply*)redisCommand(redisContextConsumer, "XREADGROUP GROUP %s %s STREAMS %s >", groupName.c_str(), consumerName.c_str(), streamName.c_str());
+        reply = (redisReply*)redisCommand(redisContextConsumer, "XREADGROUP GROUP %s %s STREAMS %s >", groupName.c_str(), consumerName.c_str(), streamName.c_str());
         if (reply != nullptr && reply->type == REDIS_REPLY_ARRAY && reply->elements > 0) {
             redisReply* messages = reply->element[0]->element[1];
             if (messages->type == REDIS_REPLY_ARRAY && messages->elements > 0) {
@@ -50,7 +118,6 @@ std::string MarketDataStreamManager::consumeData(const std::string& asset, const
                     redisReply* message = messages->element[i];
                     std::string messageId = message->element[0]->str;
                     std::string messageData = message->element[1]->element[1]->str;
-
                 }
                 freeReplyObject(reply);
                 return "";
@@ -72,66 +139,6 @@ void MarketDataStreamManager::acknowledgeMessage(const std::string& asset, const
 void MarketDataStreamManager::persistData() {
     // Placeholder: Logic to persist data to MongoDB or other storage.
     std::cout << "Persisting data to MongoDB..." << std::endl;
-}
-
-// JSON Serialization/Deserialization
-std::string MarketDataStreamManager::serializeToJson(const Kline& kline) {
-    nlohmann::json j;
-    j["Id"] = kline.Id;
-    j["StartTime"] = kline.StartTime;
-    j["EndTime"] = kline.EndTime;
-    j["Symbol"] = kline.Symbol;
-    j["Interval"] = kline.Interval;
-    j["FirstTradeID"] = kline.FirstTradeID;
-    j["LastTradeID"] = kline.LastTradeID;
-    j["Open"] = kline.Open;
-    j["Close"] = kline.Close;
-    j["High"] = kline.High;
-    j["Low"] = kline.Low;
-    j["Volume"] = kline.Volume;
-    j["TradeNum"] = kline.TradeNum;
-    j["IsFinal"] = kline.IsFinal;
-    j["QuoteVolume"] = kline.QuoteVolume;
-    j["ActiveBuyVolume"] = kline.ActiveBuyVolume;
-    j["ActiveBuyQuoteVolume"] = kline.ActiveBuyQuoteVolume;
-    j["TrueRange"] = kline.TrueRange;
-    j["AveTrueRange"] = kline.AveTrueRange;
-    j["SuperTrendValue"] = kline.SuperTrendValue;
-    j["StUp"] = kline.StUp;
-    j["StDown"] = kline.StDown;
-    j["STDirection"] = kline.STDirection;
-    j["Action"] = kline.Action;
-    return j.dump();
-}
-
-Kline MarketDataStreamManager::deserializeFromJson(const std::string& jsonStr) {
-    nlohmann::json j = nlohmann::json::parse(jsonStr);
-    Kline kline;
-    std::strncpy(kline.Id, j["Id"].get<std::string>().c_str(), sizeof(kline.Id));
-    kline.StartTime = j["StartTime"].get<int64_t>();
-    kline.EndTime = j["EndTime"].get<int64_t>();
-    std::strncpy(kline.Symbol, j["Symbol"].get<std::string>().c_str(), sizeof(kline.Symbol));
-    std::strncpy(kline.Interval, j["Interval"].get<std::string>().c_str(), sizeof(kline.Interval));
-    kline.FirstTradeID = j["FirstTradeID"].get<int64_t>();
-    kline.LastTradeID = j["LastTradeID"].get<int64_t>();
-    kline.Open = j["Open"].get<double>();
-    kline.Close = j["Close"].get<double>();
-    kline.High = j["High"].get<double>();
-    kline.Low = j["Low"].get<double>();
-    kline.Volume = j["Volume"].get<double>();
-    kline.TradeNum = j["TradeNum"].get<int64_t>();
-    kline.IsFinal = j["IsFinal"].get<bool>();
-    kline.QuoteVolume = j["QuoteVolume"].get<double>();
-    kline.ActiveBuyVolume = j["ActiveBuyVolume"].get<double>();
-    kline.ActiveBuyQuoteVolume = j["ActiveBuyQuoteVolume"].get<double>();
-    kline.TrueRange = j["TrueRange"].get<double>();
-    kline.AveTrueRange = j["AveTrueRange"].get<double>();
-    kline.SuperTrendValue = j["SuperTrendValue"].get<double>();
-    kline.StUp = j["StUp"].get<double>();
-    kline.StDown = j["StDown"].get<double>();
-    kline.STDirection = j["STDirection"].get<int>();
-    kline.Action = j["Action"].get<int>();
-    return kline;
 }
 
 // Private Helper Methods

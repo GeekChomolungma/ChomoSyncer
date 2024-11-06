@@ -12,6 +12,7 @@
 #include <boost/beast/ssl.hpp>
 
 #include "db/marketDataStreamManager.h"
+#include "db/mongoManager.h"
 
 using tcp = boost::asio::ip::tcp;
 namespace beast = boost::beast;
@@ -22,7 +23,15 @@ namespace net = boost::asio;
 // Class for handling Binance data synchronization
 class BinanceDataSync {
 public:
-    BinanceDataSync(const std::string& redisHost, int redisPort) : last_persist_time(std::chrono::steady_clock::now()), ioc_(), resolver_(ioc_), ssl_ctx_(net::ssl::context::tlsv12_client), mkdsm(redisHost, redisPort) {}
+    BinanceDataSync(const std::string& redisHost, int redisPort) : last_persist_time(std::chrono::steady_clock::now()), ioc_(), resolver_(ioc_), ssl_ctx_(net::ssl::context::tlsv12_client), mkdsM(redisHost, redisPort){}
+
+    void start() {
+        std::thread market_data_thread(&BinanceDataSync::handle_market_data, this);
+        std::thread data_persistence_thread(&BinanceDataSync::handle_data_persistence, this);
+
+        market_data_thread.join();
+        data_persistence_thread.join();
+    }
 
     void handle_market_data() {
         try {
@@ -61,8 +70,7 @@ public:
                 std::string message = beast::buffers_to_string(buffer.data());
 
                 // Process the received market data
-                // std::cout << "Market data: " << message << std::endl;
-                this->mkdsm.publishMarketData(symbol, timeframe, message);
+                this->mkdsM.publishGlobalKlines(message);
             }
 
         } catch (const std::exception &e) {
@@ -73,10 +81,8 @@ public:
 
     void handle_data_persistence() {
         while (true) {
-            std::string symbol = "btcusdt";
-            std::string timeframe = "kline_15m";
-            this->mkdsm.persistData();
-            this->mkdsm.consumeData(symbol, timeframe, "consumer1");
+            this->mkdsM.fetchGlobalKlinesAndDispatch("consumer1");
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
     
@@ -150,7 +156,8 @@ public:
     }
 
 private:
-    MarketDataStreamManager mkdsm;
+    MarketDataStreamManager mkdsM;
+    //MongoManager mongoM;
 
     std::chrono::steady_clock::time_point last_persist_time;
     const size_t BATCH_SIZE = 100;
