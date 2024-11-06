@@ -8,6 +8,8 @@
 using bsoncxx::builder::basic::kvp;
 using bsoncxx::builder::basic::make_document;
 
+std::string DB_MARKETINFO = "marketinfo";
+
 MongoManager::MongoManager(const std::string uriStr):uriStr(uriStr), mongoPool(mongocxx::uri{ this->uriStr.c_str() }){
 };
 
@@ -288,6 +290,78 @@ void MongoManager::BulkWriteByIds(std::string dbName, std::string colName, std::
     }
 }
 
+// Mongo Write Function Implementation
+void MongoManager::WriteClosedKlines(std::vector<KlineResponseWs>& rawData) {
+    try {
+        if (rawData.empty()) {
+            return;
+        }
+        
+        auto client = mongoPool.acquire();
+
+        for (auto& kline : rawData) {
+            // Determine the correct database and collection based on the symbol and interval
+            std::string dbName = DB_MARKETINFO;  // This can be adjusted to derive from kline.Symbol or other properties
+            std::string colName = std::string(kline.Symbol) + "_" + std::string(kline.Interval) + "_" + "Binance";  // This can be adjusted to derive from kline.Symbol or other properties
+            auto db = (*client)[dbName];
+            auto col = db[colName];
+
+            // Check if a document with the same starttime exists
+            bsoncxx::builder::basic::document filter_builder;
+            filter_builder.append(kvp("starttime", kline.StartTime));
+            auto existing_doc = col.find_one(filter_builder.view());
+
+            // Build the insert or update document
+            bsoncxx::builder::basic::document doc_builder;
+            doc_builder.append(
+                kvp("eventtype", kline.EventType),
+                kvp("eventtime", kline.EventTime),
+                kvp("symbol", kline.Symbol),
+                kvp("starttime", kline.StartTime),
+                kvp("endtime", kline.EndTime),
+                kvp("interval", kline.Interval),
+                kvp("firsttradeid", kline.FirstTradeID),
+                kvp("lasttradeid", kline.LastTradeID),
+                kvp("open", kline.Open),
+                kvp("high", kline.High),
+                kvp("low", kline.Low),
+                kvp("close", kline.Close),
+                kvp("volume", kline.Volume),
+                kvp("tradenum", kline.TradeNum),
+                kvp("isfinal", kline.IsFinal),
+                kvp("quotevolume", kline.QuoteVolume),
+                kvp("activebuyvolume", kline.ActiveBuyVolume),
+                kvp("activebuyquotevolume", kline.ActiveBuyQuoteVolume),
+                kvp("ignoreparam", kline.IgnoreParam)
+            );
+
+            if (existing_doc) {
+                // Update the existing document
+                bsoncxx::builder::basic::document update_builder;
+                update_builder.append(kvp("$set", doc_builder.view()));
+                col.update_one(filter_builder.view(), update_builder.view());
+            } else {
+                // Insert the new document
+                auto result = col.insert_one(doc_builder.view());
+                if (!result) {
+                    std::cerr << "Insert failed for symbol: " << kline.Symbol << "\n";
+                }
+            }
+        }
+    }
+    catch (const mongocxx::exception& e) {
+        std::cout << "WriteClosedKlines, An exception occurred: " << e.what() << std::endl;
+    }
+    catch (const std::runtime_error& e) {
+        std::cerr << "runtime error: " << e.what() << std::endl;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "error exception: " << e.what() << std::endl;
+    }
+    catch (...) {
+        std::cerr << "unknown error!" << std::endl;
+    }
+}
 std::string MongoManager::SetSettlementItems(std::string dbName, std::string colName, SettlementItem& data) {
     // locate the coll
     auto client = this->mongoPool.acquire();

@@ -37,7 +37,27 @@ public:
     int     Action; // 0 is none, 1 is sell, 2 is buy
 };
 
-class KlineResponse {
+class KlineResponseWs;
+
+class KlineResponseRest {
+public:
+    uint64_t OpenTime;                   // "openTime": 1672515780000 - Start time of this Kline
+    std::string Open;                    // "open": "0.0010" - Opening price
+    std::string High;                    // "high": "0.0025" - Highest price during this Kline
+    std::string Low;                     // "low": "0.0015" - Lowest price during this Kline
+    std::string Close;                   // "close": "0.0020" - Closing price
+    std::string Volume;                  // "volume": "1000" - Volume during this Kline
+    uint64_t CloseTime;                  // "closeTime": 1672515839999 - End time of this Kline
+    std::string QuoteAssetVolume;        // "quoteAssetVolume": "1.0000" - Quote asset volume during this Kline
+    uint64_t NumberOfTrades;             // "numberOfTrades": 100 - Number of trades during this Kline
+    std::string TakerBuyBaseAssetVolume; // "takerBuyBaseAssetVolume": "500" - Volume of active buy during this Kline
+    std::string TakerBuyQuoteAssetVolume;// "takerBuyQuoteAssetVolume": "0.500" - Quote asset volume of active buy during this Kline
+
+    // Conversion method to convert from KlineResponseWs
+    inline static KlineResponseRest fromWs(const KlineResponseWs& ws);
+};
+
+class KlineResponseWs {
 public:
     // kline info
     char EventType[16];           // "e": "kline" - Event type
@@ -60,9 +80,52 @@ public:
     std::string ActiveBuyQuoteVolume; // "Q": "0.500" - Quote asset volume of active buy during this Kline
     int64_t IgnoreParam;         // "B": "123456" - Ignore this parameter
 
+    // Conversion method to convert from KlineResponseRest
+    inline static KlineResponseWs fromRest(const KlineResponseRest& rest);
+
     // Serialization/Deserialization methods
-    static KlineResponse deserializeFromJson(const nlohmann::json& j) {
-        KlineResponse kline;
+    inline static KlineResponseWs deserializeFromJson(const nlohmann::json& j);
+    inline static nlohmann::json serializeToJson(const KlineResponseWs& kline);
+};
+
+inline KlineResponseRest KlineResponseRest::fromWs(const KlineResponseWs& ws) {
+    KlineResponseRest rest;
+    rest.OpenTime = ws.StartTime;
+    rest.CloseTime = ws.EndTime;
+    rest.Open = ws.Open;
+    rest.Close = ws.Close;
+    rest.High = ws.High;
+    rest.Low = ws.Low;
+    rest.Volume = ws.Volume;
+    rest.NumberOfTrades = ws.TradeNum;
+    rest.QuoteAssetVolume = ws.QuoteVolume;
+    rest.TakerBuyBaseAssetVolume = ws.ActiveBuyVolume;
+    rest.TakerBuyQuoteAssetVolume = ws.ActiveBuyQuoteVolume;
+    return rest;
+}
+
+inline KlineResponseWs KlineResponseWs::fromRest(const KlineResponseRest& rest) {
+    KlineResponseWs ws;
+    ws.StartTime = rest.OpenTime;
+    ws.EndTime = rest.CloseTime;
+    ws.Open = rest.Open;
+    ws.Close = rest.Close;
+    ws.High = rest.High;
+    ws.Low = rest.Low;
+    ws.Volume = rest.Volume;
+    ws.TradeNum = rest.NumberOfTrades;
+    ws.QuoteVolume = rest.QuoteAssetVolume;
+    ws.ActiveBuyVolume = rest.TakerBuyBaseAssetVolume;
+    ws.ActiveBuyQuoteVolume = rest.TakerBuyQuoteAssetVolume;
+    return ws;
+}
+
+// Serialization/Deserialization methods
+inline KlineResponseWs KlineResponseWs::deserializeFromJson(const nlohmann::json& j) {
+    KlineResponseWs kline;
+    
+    try{
+
         if (j.contains("e") && j["e"].is_string()) {
             std::strncpy(kline.EventType, j["e"].get<std::string>().c_str(), sizeof(kline.EventType));
         } else {
@@ -183,36 +246,39 @@ public:
             std::cerr << "Missing or invalid type for 'k'" << std::endl;
         }
 
-        return kline;
+    }
+    catch(const std::exception& e){
+        std::cerr << e.what() << '\n';
     }
 
-    static nlohmann::json serializeToJson(const KlineResponse& kline) {
-        nlohmann::json j;
-        j["e"] = kline.EventType;
-        j["E"] = kline.EventTime;
-        j["s"] = kline.Symbol;
-        j["k"] = {
-            {"t", kline.StartTime},
-            {"T", kline.EndTime},
-            {"s", kline.Symbol},
-            {"i", kline.Interval},
-            {"f", kline.FirstTradeID},
-            {"L", kline.LastTradeID},
-            {"o", kline.Open},
-            {"c", kline.Close},
-            {"h", kline.High},
-            {"l", kline.Low},
-            {"v", kline.Volume},
-            {"n", kline.TradeNum},
-            {"x", kline.IsFinal},
-            {"q", kline.QuoteVolume},
-            {"V", kline.ActiveBuyVolume},
-            {"Q", kline.ActiveBuyQuoteVolume},
-            // {"B", kline.IgnoreParam}
-        };
-        return j;
-    }
-};
+    return kline;
+}
 
+inline nlohmann::json KlineResponseWs::serializeToJson(const KlineResponseWs& kline) {
+    nlohmann::json j;
+    j["e"] = kline.EventType;
+    j["E"] = kline.EventTime;
+    j["s"] = kline.Symbol;
+    j["k"] = {
+        {"t", kline.StartTime},
+        {"T", kline.EndTime},
+        {"s", kline.Symbol},
+        {"i", kline.Interval},
+        {"f", kline.FirstTradeID},
+        {"L", kline.LastTradeID},
+        {"o", kline.Open},
+        {"c", kline.Close},
+        {"h", kline.High},
+        {"l", kline.Low},
+        {"v", kline.Volume},
+        {"n", kline.TradeNum},
+        {"x", kline.IsFinal},
+        {"q", kline.QuoteVolume},
+        {"V", kline.ActiveBuyVolume},
+        {"Q", kline.ActiveBuyQuoteVolume},
+        // {"B", kline.IgnoreParam}
+    };
+    return j;
+}
 
 #endif

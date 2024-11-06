@@ -30,7 +30,7 @@ public:
     void publishMarketData(const std::string& asset, const std::string& timeframe, const std::string& data);
 
     // Data Consumption Methods
-    std::string fetchGlobalKlinesAndDispatch(const std::string& consumerName);
+    std::vector<KlineResponseWs> fetchGlobalKlinesAndDispatch(const std::string& consumerName);
     std::string consumeData(const std::string& asset, const std::string& timeframe, const std::string& consumerName);
     
     void acknowledgeMessage(const std::string& asset, const std::string& timeframe, const std::string& messageId);

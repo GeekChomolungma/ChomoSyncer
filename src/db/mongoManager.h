@@ -34,6 +34,8 @@ public:
 
     void BulkWriteByIds(std::string dbName, std::string colName, std::vector<Kline>& rawData);
 
+    void WriteClosedKlines(std::vector<KlineResponseWs>& rawData);
+
     std::string SetSettlementItems(std::string dbName, std::string colName,SettlementItem& data);
 
     void GetKlineUpdate(std::string dbName, std::string colName, std::vector<Kline>& PreviousTwoKlines); // polling

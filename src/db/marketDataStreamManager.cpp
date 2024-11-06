@@ -38,13 +38,16 @@ void MarketDataStreamManager::publishMarketData(const std::string& asset, const 
 }
 
 // Data Consumption Methods
-std::string MarketDataStreamManager::fetchGlobalKlinesAndDispatch(const std::string& consumerName) {
+std::vector<KlineResponseWs> MarketDataStreamManager::fetchGlobalKlinesAndDispatch(const std::string& consumerName) {
     // Execute the XGROUP CREATE command
     redisReply* reply = (redisReply*)redisCommand(redisContextConsumer,
         "XGROUP CREATE %s %s $ MKSTREAM", GLOBAL_KLINES_STREAM.c_str(), GLOBAL_KLINES_GROUP.c_str());
     if (reply != nullptr) {
         freeReplyObject(reply);
     }
+
+    // new a vector to store the data
+    std::vector<KlineResponseWs> finalklines;
 
     reply = (redisReply*)redisCommand(redisContextConsumer, "XREADGROUP GROUP %s %s STREAMS %s >", GLOBAL_KLINES_GROUP.c_str(), consumerName.c_str(), GLOBAL_KLINES_STREAM.c_str());
     if (reply != nullptr && reply->type == REDIS_REPLY_ARRAY && reply->elements > 0) {
@@ -63,38 +66,59 @@ std::string MarketDataStreamManager::fetchGlobalKlinesAndDispatch(const std::str
                     // first resp maybe like {"result":null,"id":1}
                     auto result = j.find("result");
                     if (result != j.end() && result->is_null()) {
+                        redisCommand(redisContextConsumer, "XACK %s %s %s", GLOBAL_KLINES_STREAM.c_str(), GLOBAL_KLINES_GROUP.c_str(), messageId.c_str());
                         continue;
                     }
-                    redisCommand(redisContextConsumer, "XACK %s %s %s", GLOBAL_KLINES_STREAM.c_str(), GLOBAL_KLINES_GROUP.c_str(), messageId.c_str());
                 } catch (const std::exception& e) {
                     std::cerr << "Error deserializing message: " << e.what() << std::endl;
-                    return "";
+                    return finalklines;
                 }
 
                 // step 1: deserialize from json
-                KlineResponse kline; 
+                KlineResponseWs kline; 
                 try
                 {
-                    kline = KlineResponse::deserializeFromJson(j);
+                    kline = KlineResponseWs::deserializeFromJson(j);
                 }
                 catch(const std::exception& e)
                 {
                     std::cerr << e.what() << '\n';
-                    return "";
+                    return finalklines;
                 }  
                 
-                // step 2: persistence to mongo
+                try
+                {
+                    // step 2: persistence to mongo
+                    if (kline.IsFinal) {
+                        // final kline found, put it in the finalklines vector
+                        finalklines.push_back(kline);
+                    }
 
-                // step 3: publish to asset-timeframe stream
-                std::cout << "Publishing to asset-timeframe:" << kline.Symbol << "-" << kline.Interval << "-stream" << std::endl;
-                publishMarketData(kline.Symbol, kline.Interval, messageData);
+                    // step 3: publish to asset-timeframe stream
+                    std::cout << "Publishing to asset-timeframe:" << kline.Symbol << "-" << kline.Interval << "-stream" << std::endl;
+                    publishMarketData(kline.Symbol, kline.Interval, messageData);
+                    
+                    // step 4: ack the message
+                    // acknowledgeMessage(GLOBAL_KLINES_STREAM, GLOBAL_KLINES_GROUP, messageId);
+                    redisCommand(redisContextConsumer, "XACK %s %s %s", GLOBAL_KLINES_STREAM.c_str(), GLOBAL_KLINES_GROUP.c_str(), messageId.c_str());
+                }
+                catch(const std::exception& e)
+                {
+                    std::cerr << e.what() << '\n';
+                    continue;
+                }
             }
             freeReplyObject(reply);
-            return "";
+            reply = nullptr;
         }
     }
-    if (reply) freeReplyObject(reply);
-    return "";
+
+    if (reply != nullptr) {
+        freeReplyObject(reply);
+        reply = nullptr;
+    }
+
+    return finalklines;
 }
 
 std::string MarketDataStreamManager::consumeData(const std::string& asset, const std::string& timeframe, const std::string& consumerName) {
