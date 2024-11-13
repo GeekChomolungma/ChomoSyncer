@@ -49,6 +49,7 @@ set(SOURCES
 )
 
 file(GLOB_RECURSE SRC_FILES
+    "src/config/*"
     "src/dataSync/*"
     "src/db/*"
     "src/dtos/*"
@@ -57,6 +58,13 @@ list(APPEND SOURCES ${SRC_FILES})
 
 # Add source to this project's executable.
 add_executable(RedisTest ${SOURCES})
+
+# for config file
+configure_file(
+    ${CMAKE_SOURCE_DIR}/config.ini
+    ${CMAKE_BINARY_DIR}/config.ini
+    COPYONLY
+)
 
 # Include mongo cxx
 if(WIN32)
