@@ -26,8 +26,17 @@ public:
         return pt.get<std::string>("database.password");
     }
 
-    std::string getUri() const{
+    std::string getDatabaseUri() const{
         return pt.get<std::string>("database.uri");
+    }
+
+    // redis info
+    std::string getRedisHost() const {
+        return pt.get<std::string>("redis.host");
+    }
+
+    int getRedisPort() const {
+        return pt.get<int>("redis.port");
     }
 
     // market info

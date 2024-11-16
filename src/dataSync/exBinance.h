@@ -13,6 +13,7 @@
 
 #include "db/marketDataStreamManager.h"
 #include "db/mongoManager.h"
+#include "config/config.h"
 
 using tcp = boost::asio::ip::tcp;
 namespace beast = boost::beast;
@@ -23,7 +24,18 @@ namespace net = boost::asio;
 // Class for handling Binance data synchronization
 class BinanceDataSync {
 public:
-    BinanceDataSync(const std::string& uriCfg, const std::string& redisHost, int redisPort) : last_persist_time(std::chrono::steady_clock::now()), ioc_(), resolver_(ioc_), ssl_ctx_(net::ssl::context::tlsv12_client), mkdsM(redisHost, redisPort), mongoM(uriCfg){}
+    BinanceDataSync(const std::string& iniConfig) : 
+        last_persist_time(std::chrono::steady_clock::now()), ioc_(), resolver_(ioc_), ssl_ctx_(net::ssl::context::tlsv12_client), 
+        cfg(iniConfig),
+        mkdsM(cfg.getRedisHost(), cfg.getRedisPort()),
+        mongoM(cfg.getDatabaseUri())
+    {
+            auto redisHost = cfg.getRedisHost();
+            auto redisPort = cfg.getRedisPort();
+            auto mongoUri = cfg.getDatabaseUri();
+            marketSymbols = cfg.getMarketSubInfo("marketsub.symbols");
+            marketIntervals = cfg.getMarketSubInfo("marketsub.intervals");
+        }
 
     void start() {
         std::thread market_data_thread(&BinanceDataSync::handle_market_data, this);
@@ -31,6 +43,28 @@ public:
 
         market_data_thread.join();
         data_persistence_thread.join();
+    }
+
+    std::string subscribeRequest(const std::vector<std::string>& symbol, const std::vector<std::string>& interval) {
+        std::ostringstream oss;
+        std::string subscribePrefix = "{\"method\": \"SUBSCRIBE\", \"params\": [";
+        std::string timeframeSuffix = "kline_";
+        
+        oss << subscribePrefix;
+        for (size_t i = 0; i < symbol.size(); ++i) {
+            for (size_t j = 0; j < interval.size(); ++j) {
+                oss << "\"" << symbol[i] << "@" << timeframeSuffix << interval[j] << "\",";
+            }
+        }
+
+        // remove the last comma
+        std::string subscribeRequest = oss.str();
+        subscribeRequest.pop_back();
+        oss.str("");
+        oss.clear();
+        oss << subscribeRequest;
+        oss << "], \"id\": 1}";
+        return oss.str();
     }
 
     void handle_market_data() {
@@ -55,11 +89,7 @@ public:
             ws_stream.handshake("stream.binance.com", "/ws");
 
             // Send a subscription message to the WebSocket server
-            std::ostringstream oss;
-            std::string symbol = "btcusdt";
-            std::string timeframe = "kline_1m";
-            oss << "{\"method\": \"SUBSCRIBE\", \"params\": [\"" << symbol << "@" << timeframe << "\"], \"id\": 1}";
-            std::string json_message = oss.str();
+            std::string json_message =subscribeRequest(marketSymbols, marketIntervals);
             std::cout << "Sending message: " << json_message << std::endl;
             ws_stream.write(boost::asio::buffer(json_message));
 
@@ -93,7 +123,7 @@ public:
             // Write the closed klines to MongoDB
             mongoM.WriteClosedKlines(closedKlines);
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            // std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
     
@@ -167,8 +197,11 @@ public:
     }
 
 private:
+    Config cfg;
     MarketDataStreamManager mkdsM;
     MongoManager mongoM;
+    std::vector<std::string> marketSymbols;
+    std::vector<std::string> marketIntervals;
 
     std::chrono::steady_clock::time_point last_persist_time;
     const size_t BATCH_SIZE = 100;
