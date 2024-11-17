@@ -51,7 +51,9 @@ std::vector<KlineResponseWs> MarketDataStreamManager::fetchGlobalKlinesAndDispat
 
     reply = (redisReply*)redisCommand(redisContextConsumer, "XREADGROUP GROUP %s %s STREAMS %s >", GLOBAL_KLINES_GROUP.c_str(), consumerName.c_str(), GLOBAL_KLINES_STREAM.c_str());
     if (reply != nullptr && reply->type == REDIS_REPLY_ARRAY && reply->elements > 0) {
-        redisReply* messages = reply->element[0]->element[1]; // reply->element[0]->element[0] is the stream name
+        // check how many messages are in the reply    
+        std::cout << "Fetched from Redis global_kline_stream " << reply->element[0]->element[1]->elements << " latest market info with different symbols" << std::endl;
+        redisReply* messages = reply->element[0]->element[1]; // reply->element[0] is the redis 0th stream if you Xread multi streams, and reply->element[0]->element[0] is the stream name
         if (messages->type == REDIS_REPLY_ARRAY && messages->elements > 0) {
             for (size_t i = 0; i < messages->elements; ++i) {
                 redisReply* message = messages->element[i];

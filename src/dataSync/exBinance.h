@@ -15,6 +15,9 @@
 #include "db/mongoManager.h"
 #include "config/config.h"
 
+// when subscribe a multi combined streams in binance，payload will be like {"stream":"<streamName>","data":<rawPayload>}
+// but for kline, it is received one by one even in multi streams
+
 using tcp = boost::asio::ip::tcp;
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -22,10 +25,12 @@ namespace websocket = beast::websocket;
 namespace net = boost::asio;
 
 // Class for handling Binance data synchronization
-class BinanceDataSync {
+class BinanceDataSync : public std::enable_shared_from_this<BinanceDataSync>{
 public:
     BinanceDataSync(const std::string& iniConfig) : 
-        last_persist_time(std::chrono::steady_clock::now()), ioc_(), resolver_(ioc_), ssl_ctx_(net::ssl::context::tlsv12_client), 
+        last_persist_time(std::chrono::steady_clock::now()), 
+        ioc_(), work_guard_(net::make_work_guard(ioc_)), resolver_(ioc_), ssl_ctx_(net::ssl::context::tlsv12_client),
+        ws_stream_(ioc_, ssl_ctx_), reconnect_timer_(ioc_),
         cfg(iniConfig),
         mkdsM(cfg.getRedisHost(), cfg.getRedisPort()),
         mongoM(cfg.getDatabaseUri())
@@ -35,7 +40,7 @@ public:
             auto mongoUri = cfg.getDatabaseUri();
             marketSymbols = cfg.getMarketSubInfo("marketsub.symbols");
             marketIntervals = cfg.getMarketSubInfo("marketsub.intervals");
-        }
+    }
 
     void start() {
         std::thread market_data_thread(&BinanceDataSync::handle_market_data, this);
@@ -45,70 +50,22 @@ public:
         data_persistence_thread.join();
     }
 
-    std::string subscribeRequest(const std::vector<std::string>& symbol, const std::vector<std::string>& interval) {
-        std::ostringstream oss;
-        std::string subscribePrefix = "{\"method\": \"SUBSCRIBE\", \"params\": [";
-        std::string timeframeSuffix = "kline_";
-        
-        oss << subscribePrefix;
-        for (size_t i = 0; i < symbol.size(); ++i) {
-            for (size_t j = 0; j < interval.size(); ++j) {
-                oss << "\"" << symbol[i] << "@" << timeframeSuffix << interval[j] << "\",";
-            }
-        }
-
-        // remove the last comma
-        std::string subscribeRequest = oss.str();
-        subscribeRequest.pop_back();
-        oss.str("");
-        oss.clear();
-        oss << subscribeRequest;
-        oss << "], \"id\": 1}";
-        return oss.str();
-    }
-
     void handle_market_data() {
+        std::thread io_thread([this]() {
+            ioc_.run();
+        });
+
         try {
-            // Resolve the Binance WebSocket server address
-            auto const results = resolver_.resolve("stream.binance.com", "9443");
-
-            // Create and open a WebSocket stream
-            websocket::stream<beast::ssl_stream<tcp::socket>> ws_stream(ioc_, ssl_ctx_);
-            if (!SSL_set_tlsext_host_name(ws_stream.next_layer().native_handle(), "stream.binance.com")) {
-                throw beast::system_error(
-                    beast::error_code(static_cast<int>(::ERR_get_error()), boost::asio::error::get_ssl_category()));
-            }
-
-            // Connect to the server
-            boost::asio::connect(ws_stream.next_layer().next_layer(), results.begin(), results.end());
-
-            // Perform the SSL handshake
-            ws_stream.next_layer().handshake(boost::asio::ssl::stream_base::client);
-
-            // Perform the WebSocket handshake
-            ws_stream.handshake("stream.binance.com", "/ws");
-
-            // Send a subscription message to the WebSocket server
-            std::string json_message =subscribeRequest(marketSymbols, marketIntervals);
-            std::cout << "Sending message: " << json_message << std::endl;
-            ws_stream.write(boost::asio::buffer(json_message));
-
-            // Read messages in a loop
-            while (true) {
-                beast::flat_buffer buffer;
-                ws_stream.read(buffer);
-                std::string message = beast::buffers_to_string(buffer.data());
-
-                // Process the received market data
-                mkdsM.publishGlobalKlines(message);
-            }
-
+            connect();
+            asyncReadLoop();
         } catch (const std::exception &e) {
-            std::cerr << "WebSocket error: " << e.what() << std::endl;
+            std::cerr << "handle_market_data websocket error: " << e.what() << std::endl;
         }
+
+        io_thread.join();
+        std::cout << "handle_market_data thread exit." << std::endl;
     }
     
-
     void handle_data_persistence() {
         while (true) {
             // fecth global klines and dispatch
@@ -197,6 +154,109 @@ public:
     }
 
 private:
+    std::string subscribeRequest(const std::vector<std::string>& symbol, const std::vector<std::string>& interval) {
+        std::ostringstream oss;
+        std::string subscribePrefix = "{\"method\": \"SUBSCRIBE\", \"params\": [";
+        std::string timeframeSuffix = "kline_";
+        
+        oss << subscribePrefix;
+        for (size_t i = 0; i < symbol.size(); ++i) {
+            for (size_t j = 0; j < interval.size(); ++j) {
+                oss << "\"" << symbol[i] << "@" << timeframeSuffix << interval[j] << "\",";
+            }
+        }
+
+        // remove the last comma
+        std::string subscribeRequest = oss.str();
+        subscribeRequest.pop_back();
+        oss.str("");
+        oss.clear();
+        oss << subscribeRequest;
+        oss << "], \"id\": 1}";
+        return oss.str();
+    }
+
+    void connect(){
+        try {
+            // Resolve the Binance WebSocket server address
+            auto const results = resolver_.resolve("stream.binance.com", "9443");
+
+            // Connect to the server
+            boost::asio::connect(ws_stream_.next_layer().next_layer(), results.begin(), results.end());
+
+            // Perform the SSL handshake
+            ws_stream_.next_layer().handshake(boost::asio::ssl::stream_base::client);
+
+            // Perform the WebSocket handshake
+            ws_stream_.handshake("stream.binance.com", "/ws");
+
+            // Send a subscription message to the WebSocket server
+            std::string json_message = subscribeRequest(marketSymbols, marketIntervals);
+            std::cout << "Sending message: " << json_message << std::endl;
+            ws_stream_.write(boost::asio::buffer(json_message)); 
+
+        } catch (const std::exception &e) {
+            std::cerr << "connect error: " << e.what() << std::endl;
+            // if failed, try to reconnect
+            scheduleReconnect();
+        }
+    }
+
+    void asyncReadLoop(){
+        auto self = shared_from_this();
+        ws_stream_.async_read(buffer_, [this, self](const boost::system::error_code& ec, std::size_t bytes_transferred){
+            if(ec){
+                std::cerr << "asyncReadLoop read error: " << ec.message() << std::endl;
+                // if failed, try to reconnect
+                scheduleReconnect();
+                return;
+            }
+
+            std::string message = beast::buffers_to_string(buffer_.data());
+            buffer_.consume(bytes_transferred);
+
+            std::cout << "asyncReadLoop received message: " << message << std::endl;
+
+            if(message.find("ping") != std::string::npos){
+                // Respond to the ping message
+                std::cout << "Received ping message: " << message << std::endl;
+                sendPong(message);
+            }else{
+                // Process the received market data
+                mkdsM.publishGlobalKlines(message);
+            }
+
+            // read from the stream
+            asyncReadLoop();
+        });
+    }
+
+    void sendPong(const std::string& ping_message) {
+        auto self = shared_from_this();
+        websocket::ping_data pong_data(ping_message);
+        ws_stream_.async_pong(pong_data, [this, self](beast::error_code ec) {
+            if (ec) {
+                std::cerr << "Pong error: " << ec.message() << std::endl;
+                scheduleReconnect();
+            }
+        });
+    }
+
+    void scheduleReconnect(){
+        std::cerr << "Reconnecting to the WebSocket server in 5 seconds..." << std::endl;
+        auto self = shared_from_this();
+        reconnect_timer_.expires_after(std::chrono::seconds(5));
+        reconnect_timer_.async_wait([this, self](const boost::system::error_code& ec){
+            if(!ec){
+                connect();
+                asyncReadLoop();
+                return;
+            }else{
+                std::cerr << "scheduleReconnect reconnect timer error: " << ec.message() << std::endl;
+            }
+        });
+    }
+
     Config cfg;
     MarketDataStreamManager mkdsM;
     MongoManager mongoM;
@@ -206,9 +266,16 @@ private:
     std::chrono::steady_clock::time_point last_persist_time;
     const size_t BATCH_SIZE = 100;
     const std::chrono::seconds BATCH_TIMEOUT = std::chrono::seconds(2);
+
+    // io_context and resolver for asynchronous operations,
+    // Could be used in data sync's Multi-Connection-One-Thread model
     net::io_context ioc_;
+    net::executor_work_guard<net::io_context::executor_type> work_guard_; // keep io_context running
     tcp::resolver resolver_;
     net::ssl::context ssl_ctx_;
+    beast::flat_buffer buffer_;
+    websocket::stream<beast::ssl_stream<tcp::socket>> ws_stream_;
+    net::steady_timer reconnect_timer_;
 
     // rest operations
     std::mutex signal_mtx;

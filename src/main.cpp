@@ -9,8 +9,9 @@ std::atomic<bool> keepRunning{ true };
 
 int main() {
     // init redis, localhost and default port
-    BinanceDataSync binanceDataSync("config.ini");
-    binanceDataSync.start();
+    // create shared ptr for BinanceDataSync
+    std::shared_ptr<BinanceDataSync> binanceDataSync = std::make_shared<BinanceDataSync>("config.ini");
+    binanceDataSync->start();
 
     return 0;
 }

@@ -13,7 +13,7 @@
 // ]
 // for one stream:
 // [
-//     ["BTC-1D-stream", [ 
+//     ["BTC-1D-stream"(actually the stream1), [ 
 //         ["1680859830574-0", ["data", "Hello World"]],
 //         ["1680859830575-0", ["data", "Hello Again"]]
 //     ]]
