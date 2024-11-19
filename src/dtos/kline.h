@@ -55,17 +55,21 @@ public:
 
     // Conversion method to convert from KlineResponseWs
     inline static KlineResponseRest fromWs(const KlineResponseWs& ws);
+
+    // Serialization/Deserialization methods
+    inline static KlineResponseRest deserializeFromJson(const nlohmann::json& j);
+    inline static std::vector<KlineResponseRest> parseKlineRest(const std::string& klineString);
 };
 
 class KlineResponseWs {
 public:
     // kline info
-    char EventType[16];           // "e": "kline" - Event type
+    std::string EventType;       // "e": "kline" - Event type
     int64_t EventTime;           // "E": 1672515782136 - Event time
-    char Symbol[16];             // "s": "BNBBTC" - Trading pair
+    std::string Symbol;          // "s": "BNBBTC" - Trading pair
     int64_t StartTime;           // "t": 1672515780000 - Start time of this Kline
     int64_t EndTime;             // "T": 1672515839999 - End time of this Kline
-    char Interval[16];           // "i": "1m" - Kline interval
+    std::string Interval;        // "i": "1m" - Kline interval
     int64_t FirstTradeID;        // "f": 100 - First trade ID during this Kline
     int64_t LastTradeID;         // "L": 200 - Last trade ID during this Kline
     std::string Open;            // "o": "0.0010" - Opening price
@@ -85,8 +89,12 @@ public:
 
     // Serialization/Deserialization methods
     inline static KlineResponseWs deserializeFromJson(const nlohmann::json& j);
+    inline static KlineResponseWs deserializeFromJsonRestArrary(const nlohmann::json& j);
+    inline static void parseKlineWs(const std::string& klineString, std::string symbol, std::string interval, std::vector<KlineResponseWs>& klines);
     inline static nlohmann::json serializeToJson(const KlineResponseWs& kline);
 };
+
+// ------------------ Inline KlineResponseRest ------------------
 
 inline KlineResponseRest KlineResponseRest::fromWs(const KlineResponseWs& ws) {
     KlineResponseRest rest;
@@ -103,6 +111,44 @@ inline KlineResponseRest KlineResponseRest::fromWs(const KlineResponseWs& ws) {
     rest.TakerBuyQuoteAssetVolume = ws.ActiveBuyQuoteVolume;
     return rest;
 }
+
+inline KlineResponseRest KlineResponseRest::deserializeFromJson(const nlohmann::json& j) {
+    KlineResponseRest kline;
+    try {
+        if (j.size() < 11) {
+            throw std::runtime_error("Invalid Kline data size");
+        }
+        kline.OpenTime = j.at(0).get<uint64_t>();
+        kline.Open = j.at(1).get<std::string>();
+        kline.High = j.at(2).get<std::string>();
+        kline.Low = j.at(3).get<std::string>();
+        kline.Close = j.at(4).get<std::string>();
+        kline.Volume = j.at(5).get<std::string>();
+        kline.CloseTime = j.at(6).get<uint64_t>();
+        kline.QuoteAssetVolume = j.at(7).get<std::string>();
+        kline.NumberOfTrades = j.at(8).get<uint64_t>();
+        kline.TakerBuyBaseAssetVolume = j.at(9).get<std::string>();
+        kline.TakerBuyQuoteAssetVolume = j.at(10).get<std::string>();
+    } catch (const nlohmann::json::exception& e) {
+        std::cerr << "Error parsing Kline data: " << e.what() << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "General error: " << e.what() << std::endl;
+    }
+    return kline;
+}
+
+inline std::vector<KlineResponseRest> KlineResponseRest::parseKlineRest(const std::string& klineString) {
+    // Parse string to JSON
+    auto jsonData = nlohmann::json::parse(klineString);
+    
+    std::vector<KlineResponseRest> klines;
+    for (const auto& klineJson : jsonData) {
+        klines.push_back(KlineResponseRest::deserializeFromJson(klineJson));
+    }
+    return klines;
+}
+
+// ------------------ Inline KlineResponseWs ------------------
 
 inline KlineResponseWs KlineResponseWs::fromRest(const KlineResponseRest& rest) {
     KlineResponseWs ws;
@@ -127,7 +173,8 @@ inline KlineResponseWs KlineResponseWs::deserializeFromJson(const nlohmann::json
     try{
 
         if (j.contains("e") && j["e"].is_string()) {
-            std::strncpy(kline.EventType, j["e"].get<std::string>().c_str(), sizeof(kline.EventType));
+            kline.EventType = j["e"].get<std::string>();
+            // std::strncpy(kline.EventType, j["e"].get<std::string>().c_str(), sizeof(kline.EventType));
         } else {
             std::cerr << "Missing or invalid type for 'e'" << std::endl;
         }
@@ -139,7 +186,8 @@ inline KlineResponseWs KlineResponseWs::deserializeFromJson(const nlohmann::json
         }
 
         if (j.contains("s") && j["s"].is_string()) {
-            std::strncpy(kline.Symbol, j["s"].get<std::string>().c_str(), sizeof(kline.Symbol));
+            kline.Symbol = j["s"].get<std::string>();
+            // std::strncpy(kline.Symbol, j["s"].get<std::string>().c_str(), sizeof(kline.Symbol));
         } else {
             std::cerr << "Missing or invalid type for 's'" << std::endl;
         }
@@ -160,7 +208,8 @@ inline KlineResponseWs KlineResponseWs::deserializeFromJson(const nlohmann::json
             }
 
             if (k.contains("i") && k["i"].is_string()) {
-                std::strncpy(kline.Interval, k["i"].get<std::string>().c_str(), sizeof(kline.Interval));
+                kline.Interval = k["i"].get<std::string>();
+                // std::strncpy(kline.Interval, k["i"].get<std::string>().c_str(), sizeof(kline.Interval));
             } else {
                 std::cerr << "Missing or invalid type for 'i'" << std::endl;
             }
@@ -252,6 +301,49 @@ inline KlineResponseWs KlineResponseWs::deserializeFromJson(const nlohmann::json
     }
 
     return kline;
+}
+
+inline KlineResponseWs KlineResponseWs::deserializeFromJsonRestArrary(const nlohmann::json& j) {
+        KlineResponseWs kline;
+        try {
+            if (j.size() < 11) {
+                throw std::runtime_error("Invalid Kline data size");
+            }
+            
+            kline.EventType = "kline";
+            kline.StartTime = j.at(0).get<uint64_t>();
+            kline.Open = j.at(1).get<std::string>();
+            kline.High = j.at(2).get<std::string>();
+            kline.Low = j.at(3).get<std::string>();
+            kline.Close = j.at(4).get<std::string>();
+            kline.Volume = j.at(5).get<std::string>();
+            kline.EndTime = j.at(6).get<uint64_t>();
+            kline.QuoteVolume = j.at(7).get<std::string>();
+            kline.TradeNum = j.at(8).get<uint64_t>();
+            kline.ActiveBuyVolume = j.at(9).get<std::string>();
+            kline.ActiveBuyQuoteVolume = j.at(10).get<std::string>();
+            kline.IsFinal = true;
+
+            kline.EventTime = kline.StartTime;
+            kline.FirstTradeID = 0;
+            kline.LastTradeID = 0;
+        } catch (const nlohmann::json::exception& e) {
+            std::cerr << "Error parsing Kline data: " << e.what() << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "General error: " << e.what() << std::endl;
+        }
+        return kline;
+}
+
+inline void KlineResponseWs::parseKlineWs(const std::string& klineString, std::string symbol, std::string interval, std::vector<KlineResponseWs>& klines) {
+    // Parse string to JSON
+    auto jsonData = nlohmann::json::parse(klineString);
+    for (const auto& klineJson : jsonData) {
+        auto kline = KlineResponseWs::deserializeFromJsonRestArrary(klineJson); 
+        kline.Symbol = symbol;
+        kline.Interval = interval;
+        klines.push_back(kline);
+    }
 }
 
 inline nlohmann::json KlineResponseWs::serializeToJson(const KlineResponseWs& kline) {

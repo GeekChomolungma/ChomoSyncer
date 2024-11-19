@@ -32,9 +32,13 @@ public:
 
     void GetLatestSyncedKlines(int64_t endTime, int limit, std::string dbName, std::string colName, std::vector<Kline>& fetchedDataPerCol);
 
+    void GetLatestSyncedTime(std::string dbName, std::string colName, int64_t& latestSyncedStartTime, int64_t& latestSyncedEndTime);
+
     void BulkWriteByIds(std::string dbName, std::string colName, std::vector<Kline>& rawData);
 
-    void WriteClosedKlines(std::vector<KlineResponseWs>& rawData);
+    void WriteClosedKlines(std::string dbName, std::vector<KlineResponseWs>& rawData);
+
+    void BulkWriteClosedKlines(std::string dbName, std::string colName, std::vector<KlineResponseWs>& rawData);
 
     std::string SetSettlementItems(std::string dbName, std::string colName,SettlementItem& data);
 

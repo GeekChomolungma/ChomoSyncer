@@ -12,6 +12,5 @@ int main() {
     // create shared ptr for BinanceDataSync
     std::shared_ptr<BinanceDataSync> binanceDataSync = std::make_shared<BinanceDataSync>("config.ini");
     binanceDataSync->start();
-
     return 0;
 }
