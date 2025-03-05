@@ -19,6 +19,7 @@
 //     ]]
 // ]
 
+// A Redis wrapper class for managing market data streams
 class MarketDataStreamManager {
 public:
     // Constructor & Destructor
@@ -31,12 +32,12 @@ public:
 
     // Data Consumption Methods
     std::vector<KlineResponseWs> fetchGlobalKlinesAndDispatch(const std::string& consumerName);
-    std::string consumeData(const std::string& asset, const std::string& timeframe, const std::string& consumerName);
+    std::string consumeData(const std::string& asset, const std::string& timeframe, const std::string& consumerName); // todo:: strategy is the consumer for those dispatched data
     
     void acknowledgeMessage(const std::string& asset, const std::string& timeframe, const std::string& messageId);
 
     // Persistence Methods
-    void persistData(); // Persist data to MongoDB or other storage
+    void persistData(); // todo:: persist redis data to db, not just the klines
 
 private:
     // Private Helper Methods
