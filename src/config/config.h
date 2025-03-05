@@ -39,6 +39,10 @@ public:
         return pt.get<int>("redis.port");
     }
 
+    std::string getRedisPassword() const {
+        return pt.get<std::string>("redis.password");
+    }
+
     // market info
     // symbols, intervals, with ',' separated
     std::vector<std::string> getMarketSubInfo(std::string target) const {

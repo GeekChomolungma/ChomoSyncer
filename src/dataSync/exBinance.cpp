@@ -8,7 +8,7 @@ BinanceDataSync::BinanceDataSync(const std::string& iniConfig) :
     ioc_(), work_guard_(net::make_work_guard(ioc_)), resolver_(ioc_), ssl_ctx_(net::ssl::context::tlsv12_client),
     ws_stream_(ioc_, ssl_ctx_), reconnect_timer_(ioc_),
     cfg(iniConfig),
-    mkdsM(cfg.getRedisHost(), cfg.getRedisPort()),
+    mkdsM(cfg.getRedisHost(), cfg.getRedisPort(), cfg.getRedisPassword()),
     mongoM(cfg.getDatabaseUri())
 {
         auto redisHost = cfg.getRedisHost();

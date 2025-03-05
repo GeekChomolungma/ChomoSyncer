@@ -4,7 +4,12 @@ std::string GLOBAL_KLINES_STREAM = "global_klines_stream";
 std::string GLOBAL_KLINES_GROUP = "global_klines_group";
 
 // MarketDataStreamManager Constructor
-MarketDataStreamManager::MarketDataStreamManager(const std::string& redisHost, int redisPort) : redisHost(redisHost), redisPort(redisPort), redisContextProducer(nullptr), redisContextConsumer(nullptr) {
+MarketDataStreamManager::MarketDataStreamManager(const std::string& redisHost, int redisPort, std::string redisPassword) : redisHost(redisHost), redisPort(redisPort), redisContextProducer(nullptr), redisContextConsumer(nullptr) {
+    // check the password
+    if(!redisPassword.empty()) {
+        this->redisPassword = redisPassword;
+    }
+
     connectToRedis();
 }
 
@@ -174,9 +179,30 @@ void MarketDataStreamManager::connectToRedis() {
         std::cerr << "Producer connection error: " << (redisContextProducer ? redisContextProducer->errstr : "can't allocate redis context") << std::endl;
     }
 
+    // auth redis
+    if (!redisPassword.empty()) {
+        redisReply* reply = (redisReply*)redisCommand(redisContextProducer, "AUTH %s", redisPassword.c_str());
+        if (reply == nullptr || redisContextProducer->err) {
+            std::cerr << "Producer authentication failed: " << (redisContextProducer->errstr ? redisContextProducer->errstr : "Unknown error") << std::endl;
+            redisFree(redisContextProducer);
+            redisContextProducer = nullptr;
+        }
+        freeReplyObject(reply);
+    }
+
     redisContextConsumer = redisConnect(redisHost.c_str(), redisPort);
     if (redisContextConsumer == nullptr || redisContextConsumer->err) {
         std::cerr << "Consumer connection error: " << (redisContextConsumer ? redisContextConsumer->errstr : "can't allocate redis context") << std::endl;
+    }
+
+    if (!redisPassword.empty()) {
+        redisReply* reply = (redisReply*)redisCommand(redisContextConsumer, "AUTH %s", redisPassword.c_str());
+        if (reply == nullptr || redisContextConsumer->err) {
+            std::cerr << "Consumer authentication failed: " << (redisContextConsumer->errstr ? redisContextConsumer->errstr : "Unknown error") << std::endl;
+            redisFree(redisContextConsumer);
+            redisContextConsumer = nullptr;
+        }
+        freeReplyObject(reply);
     }
 }
 

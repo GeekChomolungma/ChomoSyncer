@@ -23,7 +23,7 @@
 class MarketDataStreamManager {
 public:
     // Constructor & Destructor
-    MarketDataStreamManager(const std::string& redisHost, int redisPort);
+    MarketDataStreamManager(const std::string& redisHost, int redisPort, std::string redisPassword);
     ~MarketDataStreamManager();
 
     // Data Publishing Methods
@@ -49,6 +49,7 @@ private:
     // Member Variables
     std::string redisHost;
     int redisPort;
+    std::string redisPassword;
     redisContext* redisContextProducer;
     redisContext* redisContextConsumer;
     std::atomic<bool> keepRunning;
