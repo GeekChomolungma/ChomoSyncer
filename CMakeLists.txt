@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 # project name
-project(RedisTest LANGUAGES CXX)
+project(ChomoSyncer LANGUAGES CXX)
 
 # C++ standard 17
 set(CMAKE_CXX_STANDARD 17)
@@ -57,7 +57,7 @@ file(GLOB_RECURSE SRC_FILES
 list(APPEND SOURCES ${SRC_FILES})
 
 # Add source to this project's executable.
-add_executable(RedisTest ${SOURCES})
+add_executable(ChomoSyncer ${SOURCES})
 
 # for config file
 configure_file(
@@ -68,25 +68,25 @@ configure_file(
 
 # Include mongo cxx
 if(WIN32)
-    target_link_libraries(RedisTest PRIVATE $<IF:$<TARGET_EXISTS:mongo::bsoncxx_static>,mongo::bsoncxx_static,mongo::bsoncxx_shared>)
-    target_link_libraries(RedisTest PRIVATE $<IF:$<TARGET_EXISTS:mongo::mongocxx_static>,mongo::mongocxx_static,mongo::mongocxx_shared>)
+    target_link_libraries(ChomoSyncer PRIVATE $<IF:$<TARGET_EXISTS:mongo::bsoncxx_static>,mongo::bsoncxx_static,mongo::bsoncxx_shared>)
+    target_link_libraries(ChomoSyncer PRIVATE $<IF:$<TARGET_EXISTS:mongo::mongocxx_static>,mongo::mongocxx_static,mongo::mongocxx_shared>)
 
 else()
-    target_include_directories(RedisTest PRIVATE ${BSONCXX_INCLUDE_DIRS})
-    target_include_directories(RedisTest PRIVATE ${MONGOCXX_INCLUDE_DIRS})
-    target_link_libraries(RedisTest PRIVATE ${BSONCXX_LIBRARIES} ${MONGOCXX_LIBRARIES})
+    target_include_directories(ChomoSyncer PRIVATE ${BSONCXX_INCLUDE_DIRS})
+    target_include_directories(ChomoSyncer PRIVATE ${MONGOCXX_INCLUDE_DIRS})
+    target_link_libraries(ChomoSyncer PRIVATE ${BSONCXX_LIBRARIES} ${MONGOCXX_LIBRARIES})
 endif()
 
 # Include boost headers and link boost library
 include_directories(${Boost_INCLUDE_DIRS})
-target_link_libraries(RedisTest PRIVATE ${Boost_LIBRARIES} OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(ChomoSyncer PRIVATE ${Boost_LIBRARIES} OpenSSL::SSL OpenSSL::Crypto)
 
 # include hiredis headers and link hiredis library
-target_include_directories(RedisTest PRIVATE ${hiredis_INCLUDE_DIRS})
-target_link_libraries(RedisTest PRIVATE hiredis::hiredis)
+target_include_directories(ChomoSyncer PRIVATE ${hiredis_INCLUDE_DIRS})
+target_link_libraries(ChomoSyncer PRIVATE hiredis::hiredis)
 
 # Include nlohmann/json headers, header only library
-target_link_libraries(RedisTest PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(ChomoSyncer PRIVATE nlohmann_json::nlohmann_json)
 
 # Add src to path
 include_directories(${CMAKE_SOURCE_DIR}/src)
@@ -99,5 +99,5 @@ elseif(UNIX)
     # Linux/Unix
     set(THREADS_PREFER_PTHREAD_FLAG ON)
     find_package(Threads REQUIRED)
-    target_link_libraries(RedisTest PRIVATE Threads::Threads)
+    target_link_libraries(ChomoSyncer PRIVATE Threads::Threads)
 endif()
