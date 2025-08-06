@@ -1,4 +1,5 @@
 #include "db/marketDataStreamManager.h"
+#include <optional>
 
 std::string GLOBAL_KLINES_STREAM = "global_klines_stream";
 std::string GLOBAL_KLINES_GROUP = "global_klines_group";
@@ -42,6 +43,42 @@ void MarketDataStreamManager::publishMarketData(const std::string& asset, const 
     }
 }
 
+std::optional<std::pair<std::string, std::string>> parseStreamMessage(redisReply* message) {
+    if (message == nullptr || message->type != REDIS_REPLY_ARRAY || message->elements != 2) {
+        std::cerr << "Invalid message format: not a 2-element array." << std::endl;
+        return std::nullopt;
+    }
+
+    // parse messageId
+    redisReply* idReply = message->element[0];
+    if (idReply->type != REDIS_REPLY_STRING) {
+        std::cerr << "Invalid message ID format." << std::endl;
+        return std::nullopt;
+    }
+    std::string messageId = idReply->str;
+
+    // parse field-value pairs
+    redisReply* fieldArray = message->element[1];
+    if (fieldArray->type != REDIS_REPLY_ARRAY || fieldArray->elements % 2 != 0) {
+        std::cerr << "Invalid field-value array." << std::endl;
+        return std::nullopt;
+    }
+
+    // iterate through field-value pairs
+    for (size_t i = 0; i < fieldArray->elements; i += 2) {
+        redisReply* field = fieldArray->element[i];
+        redisReply* value = fieldArray->element[i + 1];
+        if (field->type == REDIS_REPLY_STRING && value->type == REDIS_REPLY_STRING) {
+            if (std::string(field->str) == "data") {
+                return std::make_pair(messageId, value->str);
+            }
+        }
+    }
+
+    std::cerr << "No 'data' field found in message." << std::endl;
+    return std::nullopt;
+}
+
 // Data Consumption Methods
 std::vector<KlineResponseWs> MarketDataStreamManager::fetchGlobalKlinesAndDispatch(const std::string& consumerName) {
     // Execute the XGROUP CREATE command
@@ -62,8 +99,13 @@ std::vector<KlineResponseWs> MarketDataStreamManager::fetchGlobalKlinesAndDispat
         if (messages->type == REDIS_REPLY_ARRAY && messages->elements > 0) {
             for (size_t i = 0; i < messages->elements; ++i) {
                 redisReply* message = messages->element[i];
-                std::string messageId = message->element[0]->str;
-                std::string messageData = message->element[1]->element[1]->str;
+                auto parsed = parseStreamMessage(message);
+                if (!parsed.has_value()) {
+                    continue; // skip this message
+                }
+                const std::string& messageId = parsed->first;
+                const std::string& messageData = parsed->second;
+
                 std::cout << "fetchGlobalKlines data: " << messageData << std::endl;
 
                 // step 0: json parse and ack 0th message
@@ -118,6 +160,10 @@ std::vector<KlineResponseWs> MarketDataStreamManager::fetchGlobalKlinesAndDispat
             freeReplyObject(reply);
             reply = nullptr;
         }
+
+        // step 5: trim the stream
+        std::cout << "Trimming global klines stream to keep the latest 10000 messages." << std::endl;
+        redisCommand(redisContextConsumer, "XTRIM %s MAXLEN ~ %d", GLOBAL_KLINES_STREAM.c_str(), 10000);
     }
 
     if (reply != nullptr) {

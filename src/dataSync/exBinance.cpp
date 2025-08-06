@@ -1,7 +1,20 @@
 #include "exBinance.h"
 
 const std::string DB_MARKETINFO = "market_info";
-const uint64_t HARDCODE_KLINE_SYNC_START = 1704063600000;  // 2024-01-01 00:00:00 UTC+8
+const uint64_t HARDCODE_KLINE_SYNC_START = 1672527600000;  // 2023-01-01 00:00:00 UTC+8
+
+void printHumanReadableTime(int64_t timestamp_ms) {
+    // from milliseconds to seconds
+    std::time_t time_sec = timestamp_ms / 1000;
+
+    // transform to std::tm structure
+    std::tm* tm_ptr = std::gmtime(&time_sec);  // utc
+    // std::tm* tm_ptr = std::localtime(&time_sec); // local time
+
+    // print the time in a human-readable format
+    std::cout << "Human-readable time: "
+        << std::put_time(tm_ptr, "%Y-%m-%d %H:%M:%S") << " UTC" << std::endl;
+}
 
 BinanceDataSync::BinanceDataSync(const std::string& iniConfig) : 
     last_persist_time(std::chrono::steady_clock::now()), 
@@ -48,7 +61,7 @@ void BinanceDataSync::handle_market_data_subscribe() {
     
 void BinanceDataSync::handle_data_persistence() {
     while (true) {
-        // fecth global klines and dispatch
+        // fetch global klines and dispatch
         std::vector<KlineResponseWs> closedKlines = mkdsM.fetchGlobalKlinesAndDispatch("consumer1");
         if (closedKlines.empty()) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -201,14 +214,20 @@ void BinanceDataSync::syncOneSymbol(std::string symbol, std::string interval, u_
         int64_t endTime = 0;
         mongoM.GetLatestSyncedTime(DB_MARKETINFO, symbol + "_" + interval + "_Binance", startTime, endTime);
         if (startTime == 0) {
-            // means no data in mongo, start from the beginning
-            std::cout << "syncOneSymbol starts from the beginning hardcode time 2024-01-01-00-00, for " << symbol << "_" << interval << std::endl;
-            startTime = HARDCODE_KLINE_SYNC_START;
+            startTime = HARDCODE_KLINE_SYNC_START; 
         }else{
-            // found the last kline, start from the next time
-            std::cout << "syncOneSymbol starts from the next time " << endTime + 1 << "for " << symbol << "_" << interval << std::endl;
-            startTime = endTime + 1;
+            // Should rewrite the startTime entry again, avoiding missing/incomplete data because of shutdown or crash
+            // Or we could put startTime = endTime + 1, if we just want to start in the latest state regardless of the missing data
         }
+
+        // from milliseconds to seconds
+        std::time_t time_sec = startTime / 1000;
+        // transform to std::tm structure
+        std::tm* tm_ptr = std::gmtime(&time_sec);  // utc
+
+        // print the time in a human-readable format
+        std::cout << "SyncOneSymbol starts from the beginning time: ";
+        std::cout << std::put_time(tm_ptr, "%Y-%m-%d %H:%M:%S") << " UTC: " << startTime << " for " << symbol << "_" << interval << std::endl;
 
         // int_64 endTime convert to string
         std::ostringstream oss;
