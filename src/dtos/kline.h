@@ -25,16 +25,6 @@ public:
     double  QuoteVolume;
     double  ActiveBuyVolume;
     double  ActiveBuyQuoteVolume;
-    double  TrueRange;
-
-    // SuperTrend Indicator
-    // need to calculate if length is change
-    double  AveTrueRange;
-    double  SuperTrendValue;
-    double  StUp;
-    double  StDown;
-    int     STDirection; // -1 1
-    int     Action; // 0 is none, 1 is sell, 2 is buy
 };
 
 class KlineResponseWs;
@@ -86,6 +76,7 @@ public:
 
     // Conversion method to convert from KlineResponseRest
     inline static KlineResponseWs fromRest(const KlineResponseRest& rest);
+    inline static Kline toKline(const KlineResponseWs& ws);
 
     // Serialization/Deserialization methods
     inline static KlineResponseWs deserializeFromJson(const nlohmann::json& j);
@@ -164,6 +155,27 @@ inline KlineResponseWs KlineResponseWs::fromRest(const KlineResponseRest& rest) 
     ws.ActiveBuyVolume = rest.TakerBuyBaseAssetVolume;
     ws.ActiveBuyQuoteVolume = rest.TakerBuyQuoteAssetVolume;
     return ws;
+}
+
+inline Kline KlineResponseWs::toKline(const KlineResponseWs& ws) {
+    Kline kline;
+    kline.StartTime = ws.StartTime;
+    kline.EndTime = ws.EndTime;
+    std::strncpy(kline.Symbol, ws.Symbol.c_str(), sizeof(kline.Symbol) - 1);
+    std::strncpy(kline.Interval, ws.Interval.c_str(), sizeof(kline.Interval) - 1);
+    kline.FirstTradeID = ws.FirstTradeID;
+    kline.LastTradeID = ws.LastTradeID;
+    kline.Open = std::stod(ws.Open);
+    kline.Close = std::stod(ws.Close);
+    kline.High = std::stod(ws.High);
+    kline.Low = std::stod(ws.Low);
+    kline.Volume = std::stod(ws.Volume);
+    kline.TradeNum = ws.TradeNum;
+    kline.IsFinal = ws.IsFinal;
+    kline.QuoteVolume = std::stod(ws.QuoteVolume);
+    kline.ActiveBuyVolume = std::stod(ws.ActiveBuyVolume);
+    kline.ActiveBuyQuoteVolume = std::stod(ws.ActiveBuyQuoteVolume);
+    return kline;
 }
 
 // Serialization/Deserialization methods

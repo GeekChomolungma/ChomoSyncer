@@ -53,6 +53,7 @@ file(GLOB_RECURSE SRC_FILES
     "src/dataSync/*"
     "src/db/*"
     "src/dtos/*"
+    "src/ta/*"
 )
 list(APPEND SOURCES ${SRC_FILES})
 

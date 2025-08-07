@@ -34,9 +34,9 @@ public:
 
     void GetLatestSyncedTime(std::string dbName, std::string colName, int64_t& latestSyncedStartTime, int64_t& latestSyncedEndTime);
 
-    void BulkWriteByIds(std::string dbName, std::string colName, std::vector<Kline>& rawData);
-
     void WriteClosedKlines(std::string dbName, std::vector<KlineResponseWs>& rawData);
+
+    void WriteIndicator(std::string dbName, std::string colName, const bsoncxx::v_noabi::document::view& doc);
 
     void BulkWriteClosedKlines(std::string dbName, std::string colName, std::vector<KlineResponseWs>& rawData);
 
