@@ -46,55 +46,51 @@ int64_t MongoManager::GetSynedFlag(std::string dbName, std::string colName) {
     }
 }
 
-bool MongoManager::ParseKline(const bsoncxx::v_noabi::document::view& doc, Kline& klineInst) {
-    const auto& oidBytesVec = doc["_id"].get_oid().value.bytes();
-    for (size_t i = 0; i < 12; ++i) {
-        klineInst.Id[i] = oidBytesVec[i];
-    }
+bool MongoManager::ParseKline(const bsoncxx::document::view& doc, Kline& k) {
+    // _id -> 12 bytes
+    const auto& oid = doc["_id"].get_oid().value.bytes();
+    for (size_t i = 0; i < 12; ++i) k.Id[i] = oid[i];
 
-    auto klineContent = doc["kline"];
-    if (!klineContent) {
-        std::ostringstream ss;
-        ss << "klineContent is nil. \n" << std::endl;
-        std::cout << ss.str();
-        return false;
-    }
+    // time
+    k.StartTime = doc["starttime"].get_int64().value;
+    k.EndTime = doc["endtime"].get_int64().value;
 
-    klineInst.StartTime = klineContent["starttime"].get_int64().value;
-    klineInst.EndTime = klineContent["endtime"].get_int64().value;
-    bsoncxx::stdx::string_view symbolTmp = klineContent["symbol"].get_string().value;
-    std::string symbolStr(symbolTmp);
-    bsoncxx::stdx::string_view intervalTmp = klineContent["interval"].get_string().value;
-    std::string intervalStr(intervalTmp);
-
+    // symbol / interval
+    std::string sym = std::string(doc["symbol"].get_string().value);
+    std::string itv = std::string(doc["interval"].get_string().value);
 #ifdef _WIN32
-    strcpy_s(klineInst.Symbol, symbolStr.c_str());
-    strcpy_s(klineInst.Interval, intervalStr.c_str());
+    strcpy_s(k.Symbol, sym.c_str());
+    strcpy_s(k.Interval, itv.c_str());
 #else
-    strcpy(klineInst.Symbol, symbolStr.c_str());
-    strcpy(klineInst.Interval, intervalStr.c_str());
+    strcpy(k.Symbol, sym.c_str());
+    strcpy(k.Interval, itv.c_str());
 #endif
 
-    bsoncxx::stdx::string_view openStrTmp = klineContent["open"].get_string().value;
-    klineInst.Open = std::stod(std::string(openStrTmp));
+    // to double lambda function
+    auto to_double = [&](const char* key) -> double {
+        try {
+            return std::stod(std::string(doc[key].get_string().value));
+        }
+        catch (...) {
+            return 0.0;
+        }
+        };
 
-    bsoncxx::stdx::string_view closeStrTmp = klineContent["close"].get_string().value;
-    klineInst.Close = std::stod(std::string(closeStrTmp));
+    // OHLCV
+    k.Open = to_double("open");
+    k.High = to_double("high");
+    k.Low = to_double("low");
+    k.Close = to_double("close");
+    k.Volume = to_double("volume");
+    k.QuoteVolume = to_double("quotevolume");
 
-    bsoncxx::stdx::string_view highStrTmp = klineContent["high"].get_string().value;
-    klineInst.High = std::stod(std::string(highStrTmp));
+    // trade info
+    k.TradeNum = doc["tradenum"].get_int64().value;
+    k.IsFinal = doc["isfinal"].get_bool().value;
 
-    bsoncxx::stdx::string_view lowStrTmp = klineContent["low"].get_string().value;
-    klineInst.Low = std::stod(std::string(lowStrTmp));
-
-    bsoncxx::stdx::string_view volStrTmp = klineContent["volume"].get_string().value;
-    klineInst.Volume = std::stod(std::string(volStrTmp));
-
-    klineInst.TradeNum = klineContent["tradenum"].get_int64();
-    klineInst.IsFinal = klineContent["isfinal"].get_bool();
-
-    bsoncxx::stdx::string_view qutovStrTmp = klineContent["quotevolume"].get_string().value;
-    klineInst.QuoteVolume = std::stod(std::string(qutovStrTmp));
+    // optional fields
+    if (auto v = doc["activebuyvolume"]) { k.ActiveBuyVolume = std::stod(std::string(v.get_string().value)); }
+    if (auto v = doc["activebuyquotevolume"]) { k.ActiveBuyQuoteVolume = std::stod(std::string(v.get_string().value)); }
 
     return true;
 }
@@ -107,14 +103,14 @@ void MongoManager::GetKline(int64_t startTime, int64_t endTime, int limit, int s
     auto col = (*client)[dbName.c_str()][colName.c_str()];
 
     mongocxx::options::find opts;
-    opts.sort(make_document(kvp("kline.starttime", sortOrder)));
+    opts.sort(make_document(kvp("starttime", sortOrder)));
     opts.limit(limit);
 
     auto cursor_filtered = 
         col.find( 
             make_document(
-                kvp("kline", make_document(kvp("$exists", true))), 
-                kvp("kline.starttime", make_document(kvp("$gte", startTime), kvp("$lte", endTime)))
+                // kvp("kline", make_document(kvp("$exists", true))), 
+                kvp("starttime", make_document(kvp("$gte", startTime), kvp("$lte", endTime)))
             ), opts);
 
     for (auto&& doc : cursor_filtered) {        
@@ -126,21 +122,23 @@ void MongoManager::GetKline(int64_t startTime, int64_t endTime, int limit, int s
     }
 }
 
-void MongoManager::GetLatestSyncedKlines(int64_t endTime, int limit, std::string dbName, std::string colName, std::vector<Kline>& fetchedDataPerCol) {
+void MongoManager::GetLatestSyncedKlines(int64_t endTime, int limit, std::string dbName, std::string colName, std::vector<Kline>& fetchedDataPerCol) {    
     auto client = this->mongoPool.acquire();
-    auto col = (*client)[dbName.c_str()][colName.c_str()];
+    auto db = (*client)[dbName];
+    auto col = db[colName];
 
     mongocxx::options::find opts;
-    opts.sort(make_document(kvp("kline.starttime", -1)));
+    opts.sort(make_document(kvp("starttime", -1)));
     opts.limit(limit);
 
     bsoncxx::builder::basic::document filter;
     if (endTime != 0) {
-        filter.append(kvp("kline.starttime", make_document(kvp("$lte", endTime))));
+        filter.append(kvp("starttime", make_document(kvp("$lte", bsoncxx::types::b_int64{ endTime }))));
     }
     auto cursor_filtered = col.find(filter.view(), opts);
 
     for (auto&& doc : cursor_filtered) {
+        // std::cout << "GetLatestSyncedKlines, doc: " << bsoncxx::to_json(doc) << std::endl;
         Kline klineInst;
         auto existed = this->ParseKline(doc, klineInst);
         if (existed) {
@@ -150,7 +148,7 @@ void MongoManager::GetLatestSyncedKlines(int64_t endTime, int limit, std::string
     std::reverse(fetchedDataPerCol.begin(), fetchedDataPerCol.end());
 
     std::ostringstream ss;
-    ss << "GetLatestSyncedKlines, fetchedDataPerCol size is: " << fetchedDataPerCol.size() << "\n" << std::endl;
+    ss << "GetLatestSyncedKlines, dbName: " << dbName << " colName: " << colName << ", EndTime up to: " << endTime << ", max limit: " << limit << ", fetchedDataPerCol size is: " << fetchedDataPerCol.size() << "\n" << std::endl;
     std::cout << ss.str();
 }
 
@@ -168,14 +166,17 @@ void MongoManager::GetLatestSyncedTime(std::string dbName, std::string colName, 
         auto cursor_filtered = col.find({}, opts);
 
         if (cursor_filtered.begin() != cursor_filtered.end()) {
-            std::cout << "GetLatestSyncedTime " << colName << " found latest kline!" << std::endl;
+            
             auto latest_kline = *cursor_filtered.begin();
             latestSyncedStartTime = latest_kline["starttime"].get_int64();
             latestSyncedEndTime = latest_kline["endtime"].get_int64();
+            std::cout << "GetLatestSyncedTime " << colName << " found latest kline, time range: [" 
+                << latestSyncedStartTime << ", " << latestSyncedEndTime << "]" << std::endl;
             // auto sync_start_time = latestSyncedEndTime + 1;
         }else{
             latestSyncedStartTime = 0;
             latestSyncedEndTime = 0;
+            std::cout << "GetLatestSyncedTime " << colName << " no kline found, set time range to [0, 0]" << std::endl;
         }
     } catch (const mongocxx::exception& e) {
         std::cout << "GetLatestSyncedTime, An exception occurred: " << e.what() << std::endl;
@@ -464,7 +465,7 @@ void MongoManager::WatchKlineUpdate(std::string dbName, std::string colName, std
 
                         // sort decline to fetch the latest 2 fininished klines;
                         mongocxx::options::find opts;
-                        opts.sort(make_document(kvp("kline.starttime", -1)));
+                        opts.sort(make_document(kvp("starttime", -1)));
                         opts.limit(2);
                         auto cursor = col.find(make_document(kvp("kline.starttime", make_document(kvp("$lt", currentStartTime)))), opts);
 

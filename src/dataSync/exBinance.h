@@ -13,6 +13,7 @@
 
 #include "db/marketDataStreamManager.h"
 #include "db/mongoManager.h"
+#include "ta/indicator_manager.h"
 #include "config/config.h"
 
 // when subscribe a multi combined streams in binance，payload will be like {"stream":"<streamName>","data":<rawPayload>}
@@ -49,11 +50,13 @@ private:
 
     void syncOneSymbol(std::string symbol, std::string interval, u_int64 limit);
 
-    size_t klineRestReq(std::string symbolUpperCase, std::string interval, std::string startTime, std::string endTime, std::string limitStr);
+    std::vector<KlineResponseWs>  klineRestReq(std::string symbolUpperCase, std::string interval, std::string startTime, std::string endTime, std::string limitStr);
 
     Config cfg;
     MarketDataStreamManager mkdsM;
     MongoManager mongoM;
+    IndicatorManager indicatorM;
+
     std::vector<std::string> marketSymbols;
     std::vector<std::string> marketIntervals;
 

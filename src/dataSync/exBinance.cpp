@@ -22,7 +22,8 @@ BinanceDataSync::BinanceDataSync(const std::string& iniConfig) :
     ws_stream_(ioc_, ssl_ctx_), reconnect_timer_(ioc_),
     cfg(iniConfig),
     mkdsM(cfg.getRedisHost(), cfg.getRedisPort(), cfg.getRedisPassword()),
-    mongoM(cfg.getDatabaseUri())
+    mongoM(cfg.getDatabaseUri()),
+    indicatorM(mongoM)
 {
         auto redisHost = cfg.getRedisHost();
         auto redisPort = cfg.getRedisPort();
@@ -32,6 +33,9 @@ BinanceDataSync::BinanceDataSync(const std::string& iniConfig) :
 }
 
 void BinanceDataSync::start() {
+    // setup indicator manager, load indicators from config
+    indicatorM.loadIndicators(marketSymbols, marketIntervals);
+
     // start threads for history market data sync
     handle_history_market_data_sync();
 
@@ -206,13 +210,14 @@ void BinanceDataSync::syncOneSymbol(std::string symbol, std::string interval, u_
     std::ostringstream oss;
     oss << limit;
     std::string limitStr = oss.str();
-    std::transform(symbol.begin(), symbol.end(), symbol.begin(), ::toupper);
+    std::string upperCaseSymbol(symbol);
+    std::transform(upperCaseSymbol.begin(), upperCaseSymbol.end(), upperCaseSymbol.begin(), ::toupper);
 
     while(true){
         // check start time from mongo lasted kline
         int64_t startTime = 0;
         int64_t endTime = 0;
-        mongoM.GetLatestSyncedTime(DB_MARKETINFO, symbol + "_" + interval + "_Binance", startTime, endTime);
+        mongoM.GetLatestSyncedTime(DB_MARKETINFO, upperCaseSymbol + "_" + interval + "_Binance", startTime, endTime);
         if (startTime == 0) {
             startTime = HARDCODE_KLINE_SYNC_START; 
         }else{
@@ -227,23 +232,37 @@ void BinanceDataSync::syncOneSymbol(std::string symbol, std::string interval, u_
 
         // print the time in a human-readable format
         std::cout << "SyncOneSymbol starts from the beginning time: ";
-        std::cout << std::put_time(tm_ptr, "%Y-%m-%d %H:%M:%S") << " UTC: " << startTime << " for " << symbol << "_" << interval << std::endl;
+        std::cout << std::put_time(tm_ptr, "%Y-%m-%d %H:%M:%S") << " UTC: " << startTime << " for " << upperCaseSymbol << "_" << interval << std::endl;
 
         // int_64 endTime convert to string
         std::ostringstream oss;
         oss << startTime;
         std::string nextStartTime = oss.str();
         
-        auto fetchedCount = klineRestReq(symbol, interval, nextStartTime, "", limitStr);
-        if (fetchedCount < limit) {
+        auto FetchedKlines_ws = klineRestReq(upperCaseSymbol, interval, nextStartTime, "", limitStr);
+
+        // before new klines written, indicators calculation
+        indicatorM.prepare(DB_MARKETINFO, upperCaseSymbol, interval, 20); // pre-retrieve history klines for indicators
+        for (auto& kline_ws : FetchedKlines_ws) {
+            // convert KlineResponseWs to Kline
+            Kline klineInst = KlineResponseWs::toKline(kline_ws);
+            indicatorM.processNewKline(klineInst); // process each kline for indicators
+        }
+
+        // Write the klines to MongoDB
+        auto colName = upperCaseSymbol + "_" + interval + "_Binance";
+        mongoM.BulkWriteClosedKlines(DB_MARKETINFO, colName, FetchedKlines_ws);
+
+        if (FetchedKlines_ws.size() < limit) {
             // means the data is up to date
-            std::cout << "syncOneSymbol reach end, Fetched last " << fetchedCount << " klines for " << symbol << "_" << interval << std::endl;
+            std::cout << "syncOneSymbol reach end, Fetched last " << FetchedKlines_ws.size() << " klines for " << upperCaseSymbol << "_" << interval << std::endl;
             return;
         }
+
     }
 }
 
-size_t BinanceDataSync::klineRestReq(std::string symbolUpperCase, std::string interval, std::string startTime, std::string endTime, std::string limitStr) {
+std::vector<KlineResponseWs> BinanceDataSync::klineRestReq(std::string symbolUpperCase, std::string interval, std::string startTime, std::string endTime, std::string limitStr) {
     // Set up HTTP request
     beast::ssl_stream<tcp::socket> stream(ioc_, ssl_ctx_);
     if (!SSL_set_tlsext_host_name(stream.native_handle(), "api.binance.com")) {
@@ -278,22 +297,6 @@ size_t BinanceDataSync::klineRestReq(std::string symbolUpperCase, std::string in
     // Receive the HTTP response
     http::read(stream, buffer, res);
 
-    std::vector<KlineResponseWs> wsKlines;
-    // Parse the response and insert into MongoDB
-    if (res.result() == http::status::ok) {
-        auto body = boost::beast::buffers_to_string(res.body().data());
-
-        // Parse the kline data and insert into MongoDB
-        KlineResponseWs::parseKlineWs(body, symbolUpperCase, interval, wsKlines);
-
-        // Write the klines to MongoDB
-        auto colName = symbolUpperCase + "_" + interval + "_Binance";
-        mongoM.BulkWriteClosedKlines(DB_MARKETINFO, colName, wsKlines);
-        std::cout << "Fetched " << wsKlines.size() << " klines for " << symbolUpperCase << "_" << interval << std::endl;
-    } else {
-        std::cerr << "Failed to fetch klines. Status code: " << res.result_int() << std::endl;
-    }
-
     // Gracefully close the stream
     beast::error_code ec;
     stream.shutdown(ec);
@@ -301,5 +304,17 @@ size_t BinanceDataSync::klineRestReq(std::string symbolUpperCase, std::string in
         ec = {};
     }
 
-    return wsKlines.size();
+    std::vector<KlineResponseWs> wsKlines;
+    // Parse the response and insert into MongoDB
+    if (res.result() == http::status::ok) {
+        auto body = boost::beast::buffers_to_string(res.body().data());
+
+        // Parse the kline data and insert into MongoDB
+        KlineResponseWs::parseKlineWs(body, symbolUpperCase, interval, wsKlines);
+        std::cout << "Fetched " << wsKlines.size() << " klines for " << symbolUpperCase << "_" << interval << std::endl;
+        return wsKlines;
+    } else {
+        std::cerr << "Failed to fetch klines. Status code: " << res.result_int() << std::endl;
+        return std::vector<KlineResponseWs>();
+    }
 }
