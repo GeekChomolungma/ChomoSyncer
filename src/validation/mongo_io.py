@@ -110,7 +110,7 @@ class MongoWrapper:
         start_ms: Optional[int] = None,
         end_ms: Optional[int] = None,
         limit: Optional[int] = None,
-    ) -> Tuple[List[Dict[str, Any]], str]:
+    ) -> List[Dict[str, Any]]:
         """
         Retrieve RSI documents for a given symbol and interval.
         If no documents found, will try with typo in collection name.
