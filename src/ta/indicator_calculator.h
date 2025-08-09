@@ -4,7 +4,7 @@
 
 class IndicatorCalculator {
 public:
-    virtual void update(const Kline& newKline) = 0;
+    virtual bool update(const Kline& newKline) = 0;
     // virtual std::optional<IndicatorResult> finalize(Kline& output) = 0; // write the results to output
 
     virtual std::string name() const = 0; // return the name of the indicator, e.g., "RSI", "MACD", etc.

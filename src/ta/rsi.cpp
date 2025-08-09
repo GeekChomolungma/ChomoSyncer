@@ -3,11 +3,18 @@
 
 RSICalculator::RSICalculator(int period) : period_(period) {}
 
-void RSICalculator::update(const Kline& k) {
+bool RSICalculator::update(const Kline& k) {
+    if (!k.IsFinal) return false;
+
+    // Idempotence: avoid duplicate calculations
+    if (last_start_ >= 0 && k.StartTime <= last_start_) {
+        return false;
+    }
+
     if (!initialized_) {
         prev_close_ = k.Close;
         initialized_ = true;
-        return;
+        return false;
     }
 
     double change = k.Close - prev_close_;
@@ -48,10 +55,12 @@ void RSICalculator::update(const Kline& k) {
         result.endTime = k.EndTime;
         result.values["rsi"] = rsiVal;
 
-        latest_result_ = result;
+        latest_result_ = std::move(result);
     }
 
     prev_close_ = k.Close;
+    last_start_ = k.StartTime;   // update the last processed start time
+    return latest_result_.has_value();
 }
 
 std::optional<IndicatorResult> RSICalculator::getLatest() const {

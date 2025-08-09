@@ -4,6 +4,7 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
+#include <unordered_set>
 
 using bsoncxx::builder::basic::kvp;
 using bsoncxx::builder::basic::make_document;
@@ -295,7 +296,8 @@ void MongoManager::WriteIndicator(std::string dbName, std::string colName, const
 
 void MongoManager::BulkWriteClosedKlines(std::string dbName,
     std::string colName,
-    std::vector<KlineResponseWs>& rawData) {
+    std::vector<KlineResponseWs>& rawData) 
+{
     if (rawData.empty()) return;
 
     try {
@@ -306,6 +308,9 @@ void MongoManager::BulkWriteClosedKlines(std::string dbName,
         mongocxx::options::bulk_write bw_opts;
         bw_opts.ordered(false);
         auto bulk = col.create_bulk_write(bw_opts);
+
+        std::vector<int64_t> opStartTimes;
+        opStartTimes.reserve(rawData.size());
 
         for (auto& kline : rawData) {
             // starttime as main key filter
@@ -349,12 +354,47 @@ void MongoManager::BulkWriteClosedKlines(std::string dbName,
             // mongocxx::model::replace_one op{ filter.view(), doc.view() };
             // op.upsert(true);
             // bulk.append(op);
+
+            opStartTimes.push_back(kline.StartTime);
         }
 
         auto res = bulk.execute();
         if (!res) {
             std::cerr << "Bulk upsert failed\n";
         }
+
+        // statistics for the bulk operation
+        const auto inserted_map = res->upserted_ids();   // inserted ids map
+        const auto inserted_cnt = inserted_map.size();
+        const auto matched_cnt = res->matched_count();  // the existing entries matched by the filter
+        const auto modified_cnt = res->modified_count(); // the entries modified by the update
+
+        // reflect the inserted start times
+        std::vector<int64_t> inserted_starts;
+        inserted_starts.reserve(inserted_cnt);
+        for (auto&& kv : inserted_map) {
+            size_t op_idx = kv.first; // keep the order of insertion
+            if (op_idx < opStartTimes.size())
+                inserted_starts.push_back(opStartTimes[op_idx]);
+        }
+
+        std::cout << "[BulkUpsert] " << dbName << "." << colName
+            << " total_ops=" << rawData.size()
+            << " inserted=" << inserted_cnt
+            << " matched=" << matched_cnt
+            << " modified=" << modified_cnt
+            << std::endl;
+
+        if (!inserted_starts.empty()) {
+            std::cout << "  inserted starttimes (sample up to 10): [";
+            for (size_t i = 0; i < inserted_starts.size() && i < 10; ++i) {
+                if (i) std::cout << ", ";
+                std::cout << inserted_starts[i];
+            }
+            if (inserted_starts.size() > 10) std::cout << ", ...";
+            std::cout << "]\n";
+        }
+        // it's not necessary to return the inserted ids, but can be useful for debugging
     }
     catch (const std::exception& e) {
         std::cerr << "BulkWriteClosedKlines upsert error: " << e.what() << '\n';

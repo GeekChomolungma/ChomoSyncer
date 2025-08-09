@@ -33,8 +33,17 @@ BinanceDataSync::BinanceDataSync(const std::string& iniConfig) :
 }
 
 void BinanceDataSync::start() {
-    // setup indicator manager, load indicators from config
+    // setup indicator manager, load indicators from config, and prepare for each symbol and interval
     indicatorM.loadIndicators(marketSymbols, marketIntervals);
+    for (auto symbol : marketSymbols) {
+        for (auto interval : marketIntervals) {
+            // Prepare the indicator manager for this symbol and interval
+            std::string upperCaseSymbol(symbol);
+            std::transform(upperCaseSymbol.begin(), upperCaseSymbol.end(), upperCaseSymbol.begin(), ::toupper);
+            indicatorM.prepare(DB_MARKETINFO, upperCaseSymbol, interval, 20); // pre-retrieve history klines for indicators
+
+        }
+    }
 
     // start threads for history market data sync
     handle_history_market_data_sync();
@@ -74,10 +83,28 @@ void BinanceDataSync::handle_data_persistence() {
             std::cout << "Fetched " << closedKlines.size() << " closed klines." << std::endl;
         }
 
-        // Write the closed klines to MongoDB
-        mongoM.WriteClosedKlines(DB_MARKETINFO, closedKlines);
+        // step 1: key sorted by symbol and interval
+        std::unordered_map<std::string, std::vector<KlineResponseWs>> klinesBySymbolInterval;
+        klinesBySymbolInterval.reserve(256); // reserve some space to avoid rehashing
+        for (auto& k : closedKlines) {
+            std::string key = k.Symbol + "_" + k.Interval;
+            klinesBySymbolInterval[key].push_back(k);
+        }
 
-        // std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // step 2: update indicators for each symbol and interval
+        for (auto& [key, vec] : klinesBySymbolInterval) {
+            std::sort(vec.begin(), vec.end(),
+                [](auto& a, auto& b) { return a.StartTime < b.StartTime; });
+
+            // step 3: process each kline and update indicators
+            for (auto& ws : vec) {
+                Kline k = KlineResponseWs::toKline(ws);
+                indicatorM.processNewKline(k);
+            }
+
+            // step 4: write closed klines to MongoDB
+            mongoM.WriteClosedKlines(DB_MARKETINFO, vec);
+        }
     }
 }
 
@@ -212,18 +239,16 @@ void BinanceDataSync::syncOneSymbol(std::string symbol, std::string interval, u_
     std::string limitStr = oss.str();
     std::string upperCaseSymbol(symbol);
     std::transform(upperCaseSymbol.begin(), upperCaseSymbol.end(), upperCaseSymbol.begin(), ::toupper);
+       
+    //// Prepare the indicator manager for this symbol and interval
+    //indicatorM.prepare(DB_MARKETINFO, upperCaseSymbol, interval, 20); // pre-retrieve history klines for indicators
 
     while(true){
         // check start time from mongo lasted kline
         int64_t startTime = 0;
         int64_t endTime = 0;
         mongoM.GetLatestSyncedTime(DB_MARKETINFO, upperCaseSymbol + "_" + interval + "_Binance", startTime, endTime);
-        if (startTime == 0) {
-            startTime = HARDCODE_KLINE_SYNC_START; 
-        }else{
-            // Should rewrite the startTime entry again, avoiding missing/incomplete data because of shutdown or crash
-            // Or we could put startTime = endTime + 1, if we just want to start in the latest state regardless of the missing data
-        }
+        int64_t nextStartMs = (startTime == 0) ? HARDCODE_KLINE_SYNC_START : (endTime + 1);
 
         // from milliseconds to seconds
         std::time_t time_sec = startTime / 1000;
@@ -235,14 +260,10 @@ void BinanceDataSync::syncOneSymbol(std::string symbol, std::string interval, u_
         std::cout << std::put_time(tm_ptr, "%Y-%m-%d %H:%M:%S") << " UTC: " << startTime << " for " << upperCaseSymbol << "_" << interval << std::endl;
 
         // int_64 endTime convert to string
-        std::ostringstream oss;
-        oss << startTime;
-        std::string nextStartTime = oss.str();
-        
+        std::string nextStartTime = std::to_string(nextStartMs);
         auto FetchedKlines_ws = klineRestReq(upperCaseSymbol, interval, nextStartTime, "", limitStr);
 
         // before new klines written, indicators calculation
-        indicatorM.prepare(DB_MARKETINFO, upperCaseSymbol, interval, 20); // pre-retrieve history klines for indicators
         for (auto& kline_ws : FetchedKlines_ws) {
             // convert KlineResponseWs to Kline
             Kline klineInst = KlineResponseWs::toKline(kline_ws);

@@ -70,10 +70,10 @@ void IndicatorManager::processNewKline(const Kline& k) {
     std::string key = makeSymbolKey(k.Symbol, k.Interval);
 
     for (auto& calc : calculatorsBySymbol_[key]) {
-        calc->update(k);
-        auto resultOpt = calc->getLatest();
-        if (resultOpt.has_value()) {
-            persistIndicatorResult(resultOpt.value());
+        if (calc->update(k)) {
+            if (auto r = calc->getLatest(); r.has_value()) {
+                persistIndicatorResult(*r);
+            }
         }
     }
 }

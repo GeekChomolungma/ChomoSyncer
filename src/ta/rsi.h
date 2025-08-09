@@ -6,7 +6,7 @@ class RSICalculator : public IndicatorCalculator {
 public:
     explicit RSICalculator(int period);
 
-    void update(const Kline& k) override;
+    bool update(const Kline& k) override;
     std::string name() const override { return "rsi"; }
 
     std::optional<IndicatorResult> getLatest() const override;
@@ -20,4 +20,7 @@ private:
     bool initialized_ = false;
     double prev_close_ = 0.0;
     std::optional<IndicatorResult> latest_result_;
+
+    // Idempotence: avoding duplicate calculations
+    int64_t last_start_ = -1;
 };
