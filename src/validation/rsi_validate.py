@@ -116,6 +116,7 @@ def main():
     df_r = mw.rsi_docs_to_df(rsi_docs)
     if df_r.empty:
         raise RuntimeError("RSI collection is empty or column names do not match.")
+    print(f"Fetched {len(df_r)} RSI docs from {mw.rsi_col(period, symbol, interval)}")
 
     if "period" in df_r.columns:
         df_r = df_r[df_r["period"] == period].copy()
@@ -152,6 +153,8 @@ def main():
     merged = tmp.merge(df_lib[["starttime","rsi_lib"]],
                     on="starttime", how="inner", validate="one_to_one") \
                 .sort_values("starttime").reset_index(drop=True)
+
+    print(f"After merging on starttime, the final docs have {len(merged)} entries.")
 
     # ==== Error Statistics ====
     merged["diff_cpp_db"]  = merged["rsi_cpp"] - merged["rsi_db"]
