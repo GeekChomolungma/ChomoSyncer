@@ -62,12 +62,18 @@ void IndicatorManager::loadStates(const std::string& originDB, std::vector<std::
             mongo_.GetLatestSyncedKlines(end_time, historyWindow, originDB, key, klines_window);
 
             // step 2: get indicator state from the specific db, and initial each indicator state
-            auto indicatorList = calculatorsBySymbol_[key];
+            auto it = calculatorsBySymbol_.find(key);
+            if (it == calculatorsBySymbol_.end()) {
+                std::cerr << "No calculators for key: " << key << "\n";
+                continue;
+            }
+            auto& indicatorList = it->second;  // no copy, just reference
+
             for (const auto& indicatorInst : indicatorList) {
                 auto colName = makeSymbolKeyIndicatorName(indicatorInst->name(), indicatorInst->period(), symbol, interval);
                 auto is_ptr = getLatestIndicatorState(DB_INDICATOR, colName);
                 if (is_ptr) {
-                    std::cout << "Loaded indicator state for " << colName << std::endl;
+                    std::cout << "Loaded indicator state for " << colName << "starting from " << is_ptr->startTime << " to " << is_ptr->endTime << std::endl;
                     if (!indicatorInst->loadState(*is_ptr)) {
                         std::cerr << "Failed to load state for indicator: " << indicatorInst->name() << std::endl;
                     }
@@ -112,11 +118,9 @@ void IndicatorManager::persistIndicatorState(const IndicatorState& result) {
 std::shared_ptr<IndicatorState> IndicatorManager::getLatestIndicatorState(const std::string& dbName, const std::string& colName) {
     auto is = mongo_.ReadIndicatorLatestState(dbName, colName);
     if (is.has_value()) {
-        std::cout << "Loaded latest indicator state for " << colName << std::endl;
         return std::make_shared<IndicatorState>(is.value());
     }
     else {
-        std::cout << "No latest indicator state found for " << colName << std::endl;
         return nullptr;
     }
 }

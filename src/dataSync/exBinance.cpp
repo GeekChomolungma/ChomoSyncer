@@ -184,7 +184,7 @@ void BinanceDataSync::asyncReadLoop(){
         std::string message = beast::buffers_to_string(buffer_.data());
         buffer_.consume(bytes_transferred);
 
-        std::cout << "asyncReadLoop received message: " << message << std::endl;
+        std::cout << "AsyncReadLoop received message: " << message << std::endl;
 
         if(message.find("ping") != std::string::npos){
             // Respond to the ping message

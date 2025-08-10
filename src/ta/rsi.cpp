@@ -123,13 +123,13 @@ bool RSICalculator::update(const Kline& k) {
         result.values["rsi"] = rsiVal;
         result.values["avg_gain"] = avg_gain_;
         result.values["avg_loss"] = avg_loss_;
-        result.values["prev_close"] = prev_close_;
+        result.values["prev_close"] = k.Close;
         result.values["seeded"] = 1.0;          // means RUN
 
         // optional record warmup count
-        //result.values["warmup_count"] = 0.0;
-        //result.values["sum_gain"] = 0.0;
-        //result.values["sum_loss"] = 0.0;
+        result.values["warmup_count"] = 0.0;
+        result.values["sum_gain"] = 0.0;
+        result.values["sum_loss"] = 0.0;
 
         latest_result_ = std::move(result);
     }
@@ -143,7 +143,7 @@ bool RSICalculator::update(const Kline& k) {
         result.startTime = k.StartTime;
         result.endTime = k.EndTime;
 
-        result.values["prev_close"] = prev_close_;
+        result.values["prev_close"] = k.Close;
         result.values["seeded"] = 0.0;
 
         result.values["warmup_count"] = static_cast<double>(warmup_count_);
