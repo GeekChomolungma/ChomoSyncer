@@ -1,7 +1,7 @@
 #include "exBinance.h"
 
 const std::string DB_MARKETINFO = "market_info";
-const uint64_t HARDCODE_KLINE_SYNC_START = 1672527600000;  // 2023-01-01 00:00:00 UTC+8
+const uint64_t HARDCODE_KLINE_SYNC_START = 1748728800000;  // 2023-01-01 00:00:00 UTC+8
 
 void printHumanReadableTime(int64_t timestamp_ms) {
     // from milliseconds to seconds
@@ -267,7 +267,14 @@ void BinanceDataSync::syncOneSymbol(std::string symbol, std::string interval, u_
         for (auto& kline_ws : FetchedKlines_ws) {
             // convert KlineResponseWs to Kline
             Kline klineInst = KlineResponseWs::toKline(kline_ws);
-            indicatorM.processNewKline(klineInst); // process each kline for indicators
+
+            bool closed = is_closed_by_time(klineInst, now_in_ms());
+            if (!closed) {
+                std::cout << "Processing non-final kline: " << klineInst.StartTime << " for " << upperCaseSymbol << "_" << interval << std::endl;
+                continue;
+            }
+            
+            indicatorM.processNewKline(klineInst);
         }
 
         // Write the klines to MongoDB

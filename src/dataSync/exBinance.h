@@ -48,6 +48,21 @@ private:
 
     void scheduleReconnect();
 
+    inline int64_t now_in_ms() {
+        using namespace std::chrono;
+        return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+    }
+
+    inline bool is_closed_by_time(const Kline& k, int64_t now_local_ms, int64_t grace_ms = 1000) {
+        return now_local_ms >= (k.EndTime + grace_ms);
+    }
+
+    // TODO: add the server UTC time interface
+    inline int64_t fetch_server_time_ms(const std::string& base_url = "https://api.binance.com", bool spot = true)
+    {
+        return 0;
+    };
+
     void syncOneSymbol(std::string symbol, std::string interval, u_int64 limit);
 
     std::vector<KlineResponseWs>  klineRestReq(std::string symbolUpperCase, std::string interval, std::string startTime, std::string endTime, std::string limitStr);
