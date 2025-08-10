@@ -12,8 +12,8 @@ load_dotenv()
 MONGO_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 print("MongoDB URI:", MONGO_URI)
 DB_NAME   = "market_info"
-COLL_NAME = "BTCUSDT_5m_Binance"     # Example collection name
-INTERVAL_MS = 5 * 60 * 1000          # Interval in milliseconds (5m)
+COLL_NAME = "LTCUSDT_15m_Binance"     # Example collection name
+INTERVAL_MS = 15 * 60 * 1000          # Interval in milliseconds (5m)
 # Field names (change according to your schema)
 F_START = "starttime"
 F_OPEN  = "open"

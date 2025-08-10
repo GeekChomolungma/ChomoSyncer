@@ -1,7 +1,7 @@
 #include "exBinance.h"
 
 const std::string DB_MARKETINFO = "market_info";
-const uint64_t HARDCODE_KLINE_SYNC_START = 1753999200000;  // 2023-01-01 00:00:00 UTC+8
+const uint64_t HARDCODE_KLINE_SYNC_START = 1690840800000;  // 2023-08-01 00:00:00 UTC+8
 
 void printHumanReadableTime(int64_t timestamp_ms) {
     // from milliseconds to seconds
