@@ -99,9 +99,11 @@ def main():
     # ==== Parameters ====
     period = 14
     symbol = "BTCUSDT"
-    interval = "1h"
+    interval = "5m"
     outlier_eps = 1e-6   # You can also adjust to 1e-3/1e-2 for rough consistency
-    limit = 2000
+    start_ms = None
+    end_ms = None
+    limit = None
 
     # ==== Connect and Read ====
     if not os.getenv("MONGODB_URI"):
@@ -110,7 +112,7 @@ def main():
     mw = MongoWrapper(cfg)
 
     # Read RSI (full) + K-line (full or enough)
-    rsi_docs = mw.fetch_rsi_docs(symbol, interval, start_ms=None, end_ms=None, limit=limit)
+    rsi_docs = mw.fetch_rsi_docs(symbol, interval, period=period, start_ms=start_ms, end_ms=end_ms, limit=limit)
     df_r = mw.rsi_docs_to_df(rsi_docs)
     if df_r.empty:
         raise RuntimeError("RSI collection is empty or column names do not match.")
@@ -118,8 +120,9 @@ def main():
     if "period" in df_r.columns:
         df_r = df_r[df_r["period"] == period].copy()
 
-    klines = mw.fetch_klines(symbol, interval, start_ms=None, end_ms=None, limit=limit)
+    klines = mw.fetch_klines(symbol, interval, start_ms=start_ms, end_ms=end_ms, limit=limit)
     df_k = mw.klines_to_df(klines)
+    print(f"Fetched {len(df_k)} klines from {mw.kline_col(symbol, interval)}")
     if df_k.empty:
         raise RuntimeError("Kline collection is empty.")
 

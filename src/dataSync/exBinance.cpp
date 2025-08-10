@@ -1,7 +1,7 @@
 #include "exBinance.h"
 
 const std::string DB_MARKETINFO = "market_info";
-const uint64_t HARDCODE_KLINE_SYNC_START = 1748728800000;  // 2023-01-01 00:00:00 UTC+8
+const uint64_t HARDCODE_KLINE_SYNC_START = 1753999200000;  // 2023-01-01 00:00:00 UTC+8
 
 void printHumanReadableTime(int64_t timestamp_ms) {
     // from milliseconds to seconds
@@ -35,15 +35,9 @@ BinanceDataSync::BinanceDataSync(const std::string& iniConfig) :
 void BinanceDataSync::start() {
     // setup indicator manager, load indicators from config, and prepare for each symbol and interval
     indicatorM.loadIndicators(marketSymbols, marketIntervals);
-    for (auto symbol : marketSymbols) {
-        for (auto interval : marketIntervals) {
-            // Prepare the indicator manager for this symbol and interval
-            std::string upperCaseSymbol(symbol);
-            std::transform(upperCaseSymbol.begin(), upperCaseSymbol.end(), upperCaseSymbol.begin(), ::toupper);
-            indicatorM.prepare(DB_MARKETINFO, upperCaseSymbol, interval, 20); // pre-retrieve history klines for indicators
 
-        }
-    }
+    // load the latest indicator states from MongoDB (hot start)
+    indicatorM.loadStates(DB_MARKETINFO, marketSymbols, marketIntervals, 20);
 
     // start threads for history market data sync
     handle_history_market_data_sync();
@@ -256,14 +250,18 @@ void BinanceDataSync::syncOneSymbol(std::string symbol, std::string interval, u_
         std::tm* tm_ptr = std::gmtime(&time_sec);  // utc
 
         // print the time in a human-readable format
-        std::cout << "SyncOneSymbol starts from the beginning time: ";
-        std::cout << std::put_time(tm_ptr, "%Y-%m-%d %H:%M:%S") << " UTC: " << startTime << " for " << upperCaseSymbol << "_" << interval << std::endl;
+        std::cout << "SyncOneSymbol starts from the next starttime time: ";
+        std::cout << std::put_time(tm_ptr, "%Y-%m-%d %H:%M:%S") << " UTC: " << nextStartMs << " for " << upperCaseSymbol << "_" << interval << std::endl;
 
         // int_64 endTime convert to string
         std::string nextStartTime = std::to_string(nextStartMs);
         auto FetchedKlines_ws = klineRestReq(upperCaseSymbol, interval, nextStartTime, "", limitStr);
 
-        // before new klines written, indicators calculation
+        // a tmp vector for those to be written to mongo
+        std::vector<KlineResponseWs> KlinesToBeWritten_ws;
+        KlinesToBeWritten_ws.reserve(FetchedKlines_ws.size());
+
+        // filter the Fetched klines, remove the latest one as it's not closed yet.
         for (auto& kline_ws : FetchedKlines_ws) {
             // convert KlineResponseWs to Kline
             Kline klineInst = KlineResponseWs::toKline(kline_ws);
@@ -275,18 +273,23 @@ void BinanceDataSync::syncOneSymbol(std::string symbol, std::string interval, u_
             }
             
             indicatorM.processNewKline(klineInst);
+            KlinesToBeWritten_ws.push_back(kline_ws); // make sure non-final out
+        }
+
+        if (KlinesToBeWritten_ws.empty()) {
+            std::cout << "syncOneSymbol reach end, No closed klines to write for " << upperCaseSymbol << "_" << interval << std::endl;
+            return; // no closed klines to write, exit the loop
         }
 
         // Write the klines to MongoDB
         auto colName = upperCaseSymbol + "_" + interval + "_Binance";
-        mongoM.BulkWriteClosedKlines(DB_MARKETINFO, colName, FetchedKlines_ws);
+        mongoM.BulkWriteClosedKlines(DB_MARKETINFO, colName, KlinesToBeWritten_ws);
 
-        if (FetchedKlines_ws.size() < limit) {
+        if (KlinesToBeWritten_ws.size() < limit) {
             // means the data is up to date
-            std::cout << "syncOneSymbol reach end, Fetched last " << FetchedKlines_ws.size() << " klines for " << upperCaseSymbol << "_" << interval << std::endl;
+            std::cout << "syncOneSymbol reach end, Fetched last " << KlinesToBeWritten_ws.size() << " klines for " << upperCaseSymbol << "_" << interval << std::endl;
             return;
         }
-
     }
 }
 

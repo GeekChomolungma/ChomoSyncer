@@ -18,11 +18,11 @@ std::string IndicatorManager::makeSymbolKey(const std::string& symbol, const std
     return symbolUpper + "_" + interval + "_Binance";
 }
 
-std::string IndicatorManager::makeSymbolKeyIndicatorName(const std::string& indicatorName, const std::string& symbol, const std::string& interval) {
+std::string IndicatorManager::makeSymbolKeyIndicatorName(const std::string& indicatorName, const std::string& period, const std::string& symbol, const std::string& interval) {
     std::string symbolUpper = symbol;
     std::transform(symbolUpper.begin(), symbolUpper.end(), symbolUpper.begin(), ::toupper);
 
-    return indicatorName + "_" + symbolUpper + "_" + interval + "_Binance";
+    return indicatorName + "_" + period + "_" + symbolUpper + "_" + interval + "_Binance";
 }
 
 void IndicatorManager::loadIndicators(std::vector<std::string> marketSymbols, std::vector<std::string> marketIntervals) {
@@ -49,19 +49,33 @@ void IndicatorManager::loadIndicators(std::vector<std::string> marketSymbols, st
     }
 }
 
-void IndicatorManager::prepare(const std::string& dbName, const std::string& symbol, const std::string& interval, int historyWindow) {
-    std::cout << "Pre-retrieving history klines from db for indicators, symbol : " << symbol << ", interval: " << interval << std::endl;
-    std::string key = makeSymbolKey(symbol, interval);
+void IndicatorManager::loadStates(const std::string& originDB, std::vector<std::string> marketSymbols, std::vector<std::string> marketIntervals, int historyWindow) {
+    for (const auto& symbol : marketSymbols) {
+        for (const auto& interval : marketIntervals) {
+            std::string key = makeSymbolKey(symbol, interval);
+            
+            // step 1: fetch the latest origin klines in case some indicator need.
+            std::vector<Kline> klines_window;
+            int64_t start_time = 0;
+            int64_t end_time = 0;
+            mongo_.GetLatestSyncedTime(originDB, key, start_time, end_time);
+            mongo_.GetLatestSyncedKlines(end_time, historyWindow, originDB, key, klines_window);
 
-    std::vector<Kline> window;
-    int64_t start_time = 0;
-    int64_t end_time = 0;
-    mongo_.GetLatestSyncedTime(dbName, key, start_time, end_time);
-    mongo_.GetLatestSyncedKlines(end_time, historyWindow, dbName, key, window);
-
-    for (const auto& k : window) {
-        for (auto& calc : calculatorsBySymbol_[key]) {
-            calc->update(k);
+            // step 2: get indicator state from the specific db, and initial each indicator state
+            auto indicatorList = calculatorsBySymbol_[key];
+            for (const auto& indicatorInst : indicatorList) {
+                auto colName = makeSymbolKeyIndicatorName(indicatorInst->name(), indicatorInst->period(), symbol, interval);
+                auto is_ptr = getLatestIndicatorState(DB_INDICATOR, colName);
+                if (is_ptr) {
+                    std::cout << "Loaded indicator state for " << colName << std::endl;
+                    if (!indicatorInst->loadState(*is_ptr)) {
+                        std::cerr << "Failed to load state for indicator: " << indicatorInst->name() << std::endl;
+                    }
+                }
+                else {
+                    std::cout << "No previous state found for " << colName << ", initializing new state." << std::endl;
+                }
+            }
         }
     }
 }
@@ -72,13 +86,13 @@ void IndicatorManager::processNewKline(const Kline& k) {
     for (auto& calc : calculatorsBySymbol_[key]) {
         if (calc->update(k)) {
             if (auto r = calc->getLatest(); r.has_value()) {
-                persistIndicatorResult(*r);
+                persistIndicatorState(*r);
             }
         }
     }
 }
 
-void IndicatorManager::persistIndicatorResult(const IndicatorResult& result) {
+void IndicatorManager::persistIndicatorState(const IndicatorState& result) {
     bsoncxx::builder::basic::document doc;
     doc.append(
         kvp("starttime", result.startTime),
@@ -91,6 +105,18 @@ void IndicatorManager::persistIndicatorResult(const IndicatorResult& result) {
         doc.append(kvp(key, val));
     }
 
-    std::string colName = makeSymbolKeyIndicatorName(result.name, result.symbol, result.interval);
-    mongo_.WriteIndicator(DB_INDICATOR, colName, doc.view());
+    std::string colName = makeSymbolKeyIndicatorName(result.name, std::to_string(result.period), result.symbol, result.interval);
+    mongo_.WriteIndicatorState(DB_INDICATOR, colName, doc.view());
+}
+
+std::shared_ptr<IndicatorState> IndicatorManager::getLatestIndicatorState(const std::string& dbName, const std::string& colName) {
+    auto is = mongo_.ReadIndicatorLatestState(dbName, colName);
+    if (is.has_value()) {
+        std::cout << "Loaded latest indicator state for " << colName << std::endl;
+        return std::make_shared<IndicatorState>(is.value());
+    }
+    else {
+        std::cout << "No latest indicator state found for " << colName << std::endl;
+        return nullptr;
+    }
 }

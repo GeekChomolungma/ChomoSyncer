@@ -57,10 +57,10 @@ class MongoWrapper:
         return f"{symbol.upper()}_{interval}_Binance"
 
     @staticmethod
-    def rsi_col(symbol: str, interval: str) -> str:
+    def rsi_col(period: int, symbol: str, interval: str) -> str:
         # e.g. rsi_BTCUSDT_1h_Binance
-        print(f"Creating RSI collection name for symbol: {symbol}, interval: {interval}")
-        return f"rsi_{symbol.upper()}_{interval}_Binance"
+        print(f"Creating RSI period: {period} , collection name for symbol: {symbol}, interval: {interval}")
+        return f"rsi_{period}_{symbol.upper()}_{interval}_Binance"
 
     # --------------------------
     # Query helpers
@@ -107,6 +107,7 @@ class MongoWrapper:
         self,
         symbol: str,
         interval: str,
+        period: int,
         start_ms: Optional[int] = None,
         end_ms: Optional[int] = None,
         limit: Optional[int] = None,
@@ -115,7 +116,7 @@ class MongoWrapper:
         Retrieve RSI documents for a given symbol and interval.
         If no documents found, will try with typo in collection name.
         """
-        col_name = self.rsi_col(symbol, interval)
+        col_name = self.rsi_col(period, symbol, interval)
         col = self._col("indicators", col_name)
         q: Dict[str, Any] = {}
         if start_ms is not None or end_ms is not None:
@@ -193,8 +194,8 @@ if __name__ == "__main__":
     klines = mw.fetch_klines(symbol, interval, start_ms=None, end_ms=None, limit=1000)
     print(f"Fetched klines: {len(klines)} from {mw.kline_col(symbol, interval)}")
 
-    rsi_docs = mw.fetch_rsi_docs(symbol, interval, start_ms=None, end_ms=None, limit=1000)
-    print(f"Fetched RSI docs: {len(rsi_docs)} from {mw.rsi_col(symbol, interval)}")
+    rsi_docs = mw.fetch_rsi_docs(symbol, interval, period=14, start_ms=None, end_ms=None, limit=1000)
+    print(f"Fetched RSI docs: {len(rsi_docs)} from {mw.rsi_col(14, symbol, interval)}")
 
     df_k = mw.klines_to_df(klines)
     df_r = mw.rsi_docs_to_df(rsi_docs)

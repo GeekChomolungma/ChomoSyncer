@@ -4,7 +4,7 @@
 #include <optional>
 
 // a common structure for indicator results
-struct IndicatorResult {
+struct IndicatorState {
     std::string name; // like "RSI", "MACD", etc.
     std::string symbol;
     std::string interval;

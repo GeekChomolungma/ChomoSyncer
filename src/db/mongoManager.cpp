@@ -262,7 +262,50 @@ void MongoManager::WriteClosedKlines(std::string dbName, std::vector<KlineRespon
     }
 }
 
-void MongoManager::WriteIndicator(std::string dbName, std::string colName, const bsoncxx::document::view& doc) {
+std::optional<IndicatorState> MongoManager::ReadIndicatorLatestState(const std::string& dbName, const std::string& colName) {
+    try {
+        auto client = mongoPool.acquire();
+        auto col = (*client)[dbName][colName];
+
+        mongocxx::options::find opts;
+        // sorted by starttime descending
+        bsoncxx::builder::basic::document sort_doc;
+        sort_doc.append(bsoncxx::builder::basic::kvp("starttime", -1));
+        opts.sort(sort_doc.view());
+        opts.limit(1);
+
+        auto cursor = col.find({}, opts);
+        for (auto&& doc : cursor) {
+            IndicatorState st;
+
+            if (auto el = doc["name"];      el && el.type() == bsoncxx::type::k_utf8)  st.name = std::string(el.get_utf8().value);
+            if (auto el = doc["symbol"];      el && el.type() == bsoncxx::type::k_utf8)  st.symbol = std::string(el.get_utf8().value);
+            if (auto el = doc["interval"];      el && el.type() == bsoncxx::type::k_utf8)  st.interval = std::string(el.get_utf8().value);
+            
+            if (auto el = doc["starttime"]; el && el.type() == bsoncxx::type::k_int64)  st.startTime = el.get_int64().value;
+            if (auto el = doc["endtime"];   el && el.type() == bsoncxx::type::k_int64)  st.endTime = el.get_int64().value;
+            if (auto el = doc["period"];    el) { double v; if (element_to_double(el, v)) st.period = static_cast<int>(v); }
+
+            // put the dynamic fields to vector
+            for (auto&& el : doc) {
+                std::string key = std::string(el.key());
+                if (is_fixed_field(key)) continue;
+                double v;
+                if (element_to_double(el, v)) {
+                    st.values.emplace(std::move(key), v);
+                }
+            }
+            return st;
+        }
+        return std::nullopt; 
+    }
+    catch (const std::exception& e) {
+        std::cerr << "ReadIndicatorLatest error: " << e.what() << std::endl;
+        return std::nullopt;
+    }
+}
+
+void MongoManager::WriteIndicatorState(std::string dbName, std::string colName, const bsoncxx::document::view& doc) {
     try {
         auto client = mongoPool.acquire();
         auto col = (*client)[dbName][colName];

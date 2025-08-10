@@ -12,9 +12,12 @@
 #include <mongocxx/change_stream.hpp>
 #include <mongocxx/options/find.hpp>
 #include <mongocxx/exception/exception.hpp>
+#include <optional>
+#include <unordered_set>
 
 #include "dtos/kline.h"
 #include "dtos/settlementItem.h"
+#include "ta/indicator_state.h"
 
 using bsoncxx::to_json;
 using bsoncxx::builder::basic::make_document;
@@ -36,7 +39,32 @@ public:
 
     void WriteClosedKlines(std::string dbName, std::vector<KlineResponseWs>& rawData);
 
-    void WriteIndicator(std::string dbName, std::string colName, const bsoncxx::v_noabi::document::view& doc);
+    std::optional<IndicatorState> ReadIndicatorLatestState(const std::string& dbName, const std::string& colName);
+
+    static inline bool is_fixed_field(std::string_view k) {
+        static const std::unordered_set<std::string> fixed = {
+            "_id", "starttime", "endtime", "name", "period", "symbol", "interval"
+        };
+        return fixed.count(std::string(k)) > 0;
+    }
+
+    static inline bool element_to_double(const bsoncxx::document::element& el, double& out) {
+        using bsoncxx::type;
+        switch (el.type()) {
+        case type::k_double:     out = el.get_double().value; return true;
+        case type::k_int32:      out = static_cast<double>(el.get_int32().value); return true;
+        case type::k_int64:      out = static_cast<double>(el.get_int64().value); return true;
+        case type::k_decimal128: {
+            auto dec = el.get_decimal128().value;
+            try { out = std::stod(dec.to_string()); }
+            catch (...) { return false; }
+            return true;
+        }
+        default: return false;
+        }
+    }
+
+    void WriteIndicatorState(std::string dbName, std::string colName, const bsoncxx::v_noabi::document::view& doc);
 
     void BulkWriteClosedKlines(std::string dbName, std::string colName, std::vector<KlineResponseWs>& rawData);
 
