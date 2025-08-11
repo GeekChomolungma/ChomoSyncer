@@ -40,6 +40,10 @@ void MarketDataStreamManager::publishMarketData(const std::string& asset, const 
         } else {
             freeReplyObject(reply);
         }
+
+        // trim the symbol stream to keep the latest 10000 messages
+        std::cout << "Trimming stream " << streamName << " to keep the latest 10000 messages." << std::endl;
+        redisCommand(redisContextConsumer, "XTRIM %s MAXLEN ~ %d", streamName.c_str(), 10000);
     }
 }
 

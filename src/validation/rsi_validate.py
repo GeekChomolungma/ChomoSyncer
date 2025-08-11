@@ -99,7 +99,7 @@ def main():
     # ==== Parameters ====
     period = 14
     symbol = "BTCUSDT"
-    interval = "5m"
+    interval = "15m"
     outlier_eps = 1e-6   # You can also adjust to 1e-3/1e-2 for rough consistency
     start_ms = None
     end_ms = None
