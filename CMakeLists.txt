@@ -12,7 +12,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 # Find the OpenSSL package
 find_package(OpenSSL REQUIRED)
 
-# Find the MONGOCXX package
+# --- MongoCXX/BSONCXX ---
 if(WIN32)
     find_package(bsoncxx CONFIG REQUIRED)
     find_package(mongocxx CONFIG REQUIRED)
@@ -30,17 +30,25 @@ else()
     message("MONGOCXX_LIBRARIES = ${MONGOCXX_LIBRARIES}")
 endif()
 
-# Find boost package
+# --- Boost ---
 find_package(Boost REQUIRED COMPONENTS system thread)
 message("Boost_INCLUDE_DIRS = ${Boost_INCLUDE_DIRS}")
 message("Boost_LIBRARIES = ${Boost_LIBRARIES}")
 
-# Find hiredis package
-find_package(hiredis CONFIG REQUIRED)
-message(STATUS "Hiredis include directories: ${hiredis_INCLUDE_DIRS}")
-message(STATUS "Hiredis library: ${hiredis_LIBRARIES}")
+# --- Hiredis ---
+if (WIN32)
+  find_package(hiredis CONFIG REQUIRED)
+else()
+  find_package(hiredis CONFIG QUIET)
+  if (NOT TARGET hiredis::hiredis)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(HIREDIS REQUIRED hiredis)
+    message("HIREDIS_INCLUDE_DIRS = ${HIREDIS_INCLUDE_DIRS}")
+    message("HIREDIS_LIBRARIES    = ${HIREDIS_LIBRARIES}")
+  endif()
+endif()
 
-# Find nlohmann/json
+# --- nlohmann/json ---
 find_package(nlohmann_json 3.2.0 REQUIRED)
 
 # Add your CUDA source files and other source files
@@ -67,7 +75,7 @@ configure_file(
     COPYONLY
 )
 
-# Include mongo cxx
+# --- Link/include MongoCXX/BSONCXX ---
 if(WIN32)
     target_link_libraries(ChomoSyncer PRIVATE $<IF:$<TARGET_EXISTS:mongo::bsoncxx_static>,mongo::bsoncxx_static,mongo::bsoncxx_shared>)
     target_link_libraries(ChomoSyncer PRIVATE $<IF:$<TARGET_EXISTS:mongo::mongocxx_static>,mongo::mongocxx_static,mongo::mongocxx_shared>)
@@ -78,15 +86,21 @@ else()
     target_link_libraries(ChomoSyncer PRIVATE ${BSONCXX_LIBRARIES} ${MONGOCXX_LIBRARIES})
 endif()
 
-# Include boost headers and link boost library
+# --- Link Boost/OpenSSL/Threads ---
 include_directories(${Boost_INCLUDE_DIRS})
 target_link_libraries(ChomoSyncer PRIVATE ${Boost_LIBRARIES} OpenSSL::SSL OpenSSL::Crypto)
 
-# include hiredis headers and link hiredis library
-target_include_directories(ChomoSyncer PRIVATE ${hiredis_INCLUDE_DIRS})
-target_link_libraries(ChomoSyncer PRIVATE hiredis::hiredis)
+# --- Link/include Hiredis ---
+if (WIN32 OR TARGET hiredis::hiredis)
+  # vcpkg has the config file
+  target_link_libraries(ChomoSyncer PRIVATE hiredis::hiredis)
+else()
+  # Use pkg-config
+  target_include_directories(ChomoSyncer PRIVATE ${HIREDIS_INCLUDE_DIRS})
+  target_link_libraries(ChomoSyncer PRIVATE ${HIREDIS_LIBRARIES})
+endif()
 
-# Include nlohmann/json headers, header only library
+# --- Link nlohmann/json headers, header only library ---
 target_link_libraries(ChomoSyncer PRIVATE nlohmann_json::nlohmann_json)
 
 # Add src to path
