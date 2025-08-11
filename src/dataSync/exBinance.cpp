@@ -226,7 +226,7 @@ void BinanceDataSync::scheduleReconnect(){
     });
 }
 
-void BinanceDataSync::syncOneSymbol(std::string symbol, std::string interval, u_int64 limit){
+void BinanceDataSync::syncOneSymbol(std::string symbol, std::string interval, uint64_t limit){
     // convert limit to string
     std::ostringstream oss;
     oss << limit;

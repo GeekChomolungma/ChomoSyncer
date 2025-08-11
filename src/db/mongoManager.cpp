@@ -278,9 +278,9 @@ std::optional<IndicatorState> MongoManager::ReadIndicatorLatestState(const std::
         for (auto&& doc : cursor) {
             IndicatorState st;
 
-            if (auto el = doc["name"];      el && el.type() == bsoncxx::type::k_utf8)  st.name = std::string(el.get_utf8().value);
-            if (auto el = doc["symbol"];      el && el.type() == bsoncxx::type::k_utf8)  st.symbol = std::string(el.get_utf8().value);
-            if (auto el = doc["interval"];      el && el.type() == bsoncxx::type::k_utf8)  st.interval = std::string(el.get_utf8().value);
+            if (auto el = doc["name"];      el && el.type() == bsoncxx::type::k_utf8)  st.name = std::string(el.get_string().value);
+            if (auto el = doc["symbol"];      el && el.type() == bsoncxx::type::k_utf8)  st.symbol = std::string(el.get_string().value);
+            if (auto el = doc["interval"];      el && el.type() == bsoncxx::type::k_utf8)  st.interval = std::string(el.get_string().value);
             
             if (auto el = doc["starttime"]; el && el.type() == bsoncxx::type::k_int64)  st.startTime = el.get_int64().value;
             if (auto el = doc["endtime"];   el && el.type() == bsoncxx::type::k_int64)  st.endTime = el.get_int64().value;
@@ -393,7 +393,7 @@ void MongoManager::BulkWriteClosedKlines(std::string dbName,
             op.upsert(true);
             bulk.append(op);
 
-            // or replace whole the entry£ºreplace_one + upsert
+            // or replace whole the entry: replace_one + upsert
             // mongocxx::model::replace_one op{ filter.view(), doc.view() };
             // op.upsert(true);
             // bulk.append(op);

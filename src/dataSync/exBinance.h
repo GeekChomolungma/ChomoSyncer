@@ -1,3 +1,6 @@
+#include <cstdint>
+#include <iomanip>  // for std::put_time
+#include <ctime>    // for std::tm, std::localtime
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -63,7 +66,7 @@ private:
         return 0;
     };
 
-    void syncOneSymbol(std::string symbol, std::string interval, u_int64 limit);
+    void syncOneSymbol(std::string symbol, std::string interval, uint64_t limit);
 
     std::vector<KlineResponseWs>  klineRestReq(std::string symbolUpperCase, std::string interval, std::string startTime, std::string endTime, std::string limitStr);
 
