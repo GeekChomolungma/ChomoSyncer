@@ -38,7 +38,7 @@ Refer to the [Ubuntu installation guide](install_guide_ubu.md) for detailed step
 
 ## Usage
 
-1. Edit `config.ini` to configure Binance API, Redis, MongoDB, and other parameters.
+1. Edit `config.ini` to configure Binance API, Redis, MongoDB, and other parameters(see conmments in config.ini)
 2. Start the program:
 
    ```bash
