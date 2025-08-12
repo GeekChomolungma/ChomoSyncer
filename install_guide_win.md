@@ -1,19 +1,10 @@
-# ChomoSyncer - Build & Install Guide (Ubuntu & Windows)
+# ChomoSyncer - Build & Install Guide (Windows)
 
-This guide covers **Ubuntu 20.04 / 22.04 / 24.04** and **Windows (VS 2022 + vcpkg)** installation and build steps for ChomoSyncer. It assumes a clean environment and walks you through dependencies, configuration, and compilation.
+This guide covers **Windows (VS 2022 + vcpkg)** installation and build steps for ChomoSyncer. It assumes a clean environment and walks you through dependencies, configuration, and compilation.
 
 ---
 
-## 1. Prerequisites
-
-### 1.1 Ubuntu
-
-```bash
-sudo apt update
-sudo apt install -y build-essential cmake pkg-config git
-```
-
-### 1.2 Windows
+## 1. Prerequisites - Windows
 
 * Install **Visual Studio 2022** with the workload:
 
@@ -32,60 +23,7 @@ D:/vcpkg/bootstrap-vcpkg.bat
 
 ---
 
-## 2. Dependencies
-
-### 2.1 Ubuntu Base Libraries
-
-```bash
-sudo apt install -y libssl-dev \
-    libboost-system-dev libboost-thread-dev \
-    libhiredis-dev \
-    nlohmann-json3-dev
-```
-
-> On Ubuntu 20, `libhiredis-dev` does **not** include a `hiredisConfig.cmake`.
-
-### 2.2 Ubuntu MongoDB C Driver
-
-```bash
-sudo apt install -y libsasl2-dev libbson-1.0-0 libbson-dev libmongoc-1.0-0 libmongoc-dev
-```
-
-### 2.3 Ubuntu MongoDB C++ Driver (bsoncxx / mongocxx)
-
-**Option A: From APT (Ubuntu 22.04+)**
-
-```bash
-sudo apt install -y libbsoncxx-dev libmongocxx-dev
-```
-
-**Option B: From Source (Ubuntu 20.x or older)**
-
-```bash
-mkdir -p ~/src && cd ~/src
-# download from https://github.com/mongodb/mongo-cxx-driver/releases
-# assume tar unpacked to mongo-cxx-driver-rX.Y.Z
-cd mongo-cxx-driver-rX.Y.Z/build
-cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
-make -j"$(nproc)"
-sudo make install
-sudo ldconfig
-```
-
-Verify:
-
-```bash
-pkg-config --modversion libmongocxx
-pkg-config --modversion libbsoncxx
-```
-
-If installed under `/usr/local`, set `PKG_CONFIG_PATH`:
-
-```bash
-export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH}
-```
-
-### 2.4 Windows Dependencies via vcpkg
+## 2. Dependencies - Windows Dependencies via vcpkg
 
 Make sure `vcpkg` is bootstrapped (see §1.2). Then install these ports:
 
@@ -120,23 +58,7 @@ cd ChomoSyncer
 
 ---
 
-## 4. Configure & Build
-
-### 4.1 Ubuntu
-
-We handle platform differences in `CMakeLists.txt`:
-
-* Linux uses `pkg-config` for `mongocxx/bsoncxx/hiredis` when CONFIG packages are not present.
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j"$(nproc)"
-```
-
-The executable will be at `build/ChomoSyncer`.
-`config.ini` will be copied into `build/config.ini`.
-
-### 4.2 Windows (VS 2022 + vcpkg)
+## 4. Configure & Build - Windows (VS 2022 + vcpkg)
 
 Use **vcpkg toolchain** when configuring with CMake:
 
@@ -166,15 +88,6 @@ build/Release/ChomoSyncer.exe  (multi-config generators)
 ---
 
 ## 5. Run
-
-### Ubuntu
-
-```bash
-cd build
-./ChomoSyncer
-```
-
-### Windows
 
 ```powershell
 cd build/Release

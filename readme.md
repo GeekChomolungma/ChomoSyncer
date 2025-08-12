@@ -30,7 +30,11 @@ Make sure both services are accessible using the connection parameters defined i
 
 ### 1. Install ChomoSyncer
 
-Refer to the [installation guide](install_guide.md) for detailed steps to install dependencies and build the project on Ubuntu and Windows.
+#### Windows
+Refer to the [Windows installation guide](install_guide_win.md) for detailed steps.
+
+#### Ubuntu
+Refer to the [Ubuntu installation guide](install_guide_ubu.md) for detailed steps.
 
 ## Usage
 
