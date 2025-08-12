@@ -4,6 +4,9 @@
 
 ChomoSyncer is a high-performance market data synchronizer for Binance. It retrieves real-time cryptocurrency candlestick (Kline) data and distributes it via Redis while storing it in MongoDB. It supports a multi-threaded and asynchronous architecture, making it suitable for quantitative trading, data analysis, and backtesting scenarios.
 
+![ChomoSyncer Workflow](docs/images/workflow.jpg)
+
+
 ## Features
 
 * **Real-time market data sync**: Combines WebSocket and REST API to fetch multi-symbol Kline data with low latency.
@@ -31,10 +34,10 @@ Make sure both services are accessible using the connection parameters defined i
 ### 1. Install ChomoSyncer
 
 #### Windows
-Refer to the [Windows installation guide](install_guide_win.md) for detailed steps.
+Refer to the [Windows installation guide](docs/install_guide_win.md) for detailed steps.
 
 #### Ubuntu
-Refer to the [Ubuntu installation guide](install_guide_ubu.md) for detailed steps.
+Refer to the [Ubuntu installation guide](docs/install_guide_ubu.md) for detailed steps.
 
 ## Usage
 
