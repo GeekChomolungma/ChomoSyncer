@@ -19,17 +19,19 @@ void printHumanReadableTime(int64_t timestamp_ms) {
 BinanceDataSync::BinanceDataSync(const std::string& iniConfig) : 
     last_persist_time(std::chrono::steady_clock::now()), 
     ioc_(), work_guard_(net::make_work_guard(ioc_)), resolver_(ioc_), ssl_ctx_(net::ssl::context::tlsv12_client),
-    ws_stream_(ioc_, ssl_ctx_), reconnect_timer_(ioc_),
+    reconnect_timer_(ioc_), ping_timer_(ioc_), strand_(ioc_.get_executor()),
     cfg(iniConfig),
     mkdsM(cfg.getRedisHost(), cfg.getRedisPort(), cfg.getRedisPassword()),
     mongoM(cfg.getDatabaseUri()),
     indicatorM(mongoM)
-{
-        auto redisHost = cfg.getRedisHost();
-        auto redisPort = cfg.getRedisPort();
-        auto mongoUri = cfg.getDatabaseUri();
-        marketSymbols = cfg.getMarketSubInfo("marketsub.symbols");
-        marketIntervals = cfg.getMarketSubInfo("marketsub.intervals");
+{      
+    ws_stream_ = std::make_unique<WsStream>(ioc_, ssl_ctx_);
+
+    auto redisHost = cfg.getRedisHost();
+    auto redisPort = cfg.getRedisPort();
+    auto mongoUri = cfg.getDatabaseUri();
+    marketSymbols = cfg.getMarketSubInfo("marketsub.symbols");
+    marketIntervals = cfg.getMarketSubInfo("marketsub.intervals");
 }
 
 void BinanceDataSync::start() {
@@ -44,26 +46,36 @@ void BinanceDataSync::start() {
 
     // start two threads for market data subscribe and data persistence
     std::cout << "Start two threads for market data subscribe and data persistence." << std::endl;
-    std::thread market_data_thread(&BinanceDataSync::handle_market_data_subscribe, this);
+
+    // start the io_context in a separate thread
+    // in the future, we can expand the threads to multi-threads
+    std::thread io_thread([this]() { ioc_.run(); }); 
+
+    // start the market data subscribe and data persistence threads
+    std::thread market_data_thread(&BinanceDataSync::handle_market_data_subscribe, this); // not necessary use thread, but leave thread + io_context post(async) for future expansion
     std::thread data_persistence_thread(&BinanceDataSync::handle_data_persistence, this);
+    
     market_data_thread.join();
     data_persistence_thread.join();
+
+    // stop the io_context when all threads are done
+    // otherwise, if no ioc stop, because of work_guard_, this join is not reachable, will block.
+    ioc_.stop(); 
+    io_thread.join(); 
 }
 
 void BinanceDataSync::handle_market_data_subscribe() {
-    std::thread io_thread([this]() {
-        ioc_.run();
-    });
-
     try {
-        connect();
-        asyncReadLoop();
+        net::post(strand_, [this, self = shared_from_this()] {
+            if (!connect_noexcept()) { scheduleReconnect(); return; }
+            startPing(); // start the ping timer to keep the connection alive
+            asyncReadLoop(); // start the async read loop to receive messages
+            });
     } catch (const std::exception &e) {
         std::cerr << "handle_market_data websocket error: " << e.what() << std::endl;
     }
 
-    io_thread.join();
-    std::cout << "handle_market_data thread exit." << std::endl;
+    std::cout << "handle_market_data_subscribe Posted" << std::endl;
 }
     
 void BinanceDataSync::handle_data_persistence() {
@@ -145,84 +157,163 @@ std::string BinanceDataSync::subscribeRequest(const std::vector<std::string>& sy
     return oss.str();
 }
 
-void BinanceDataSync::connect(){
-    try {
-        // Resolve the Binance WebSocket server address
-        auto const results = resolver_.resolve("stream.binance.com", "9443");
+bool BinanceDataSync::connect_noexcept(){
+    // Reset the WebSocket stream before connecting
+    reset_websocket();
+    beast::error_code ec;
 
-        // Connect to the server
-        net::connect(ws_stream_.next_layer().next_layer(), results.begin(), results.end());
-
-        // Perform the SSL handshake
-        ws_stream_.next_layer().handshake(net::ssl::stream_base::client);
-
-        // Perform the WebSocket handshake
-        ws_stream_.handshake("stream.binance.com", "/ws");
-
-        // Send a subscription message to the WebSocket server
-        std::string json_message = subscribeRequest(marketSymbols, marketIntervals);
-        std::cout << "Sending message: " << json_message << std::endl;
-        ws_stream_.write(net::buffer(json_message)); 
-
-    } catch (const std::exception &e) {
-        std::cerr << "connect error: " << e.what() << std::endl;
-        // if failed, try to reconnect
-        scheduleReconnect();
+    // SNI: set the server name indication for the TLS(SSL) context in Hello message, so that the server can present the correct certificate
+    if (!SSL_set_tlsext_host_name(ws_stream_->next_layer().native_handle(), "stream.binance.com")) {
+        return false;
     }
+
+    // Resolve the Binance WebSocket server address
+    tcp::resolver resolver{ ioc_ };
+    auto res = resolver.resolve("stream.binance.com", "9443", ec);
+    if (ec) {
+        std::cerr << "Error resolving WebSocket server: " << ec.message() << std::endl;
+        return false;
+    }
+
+    // Connect to the server use TCP layers
+    net::connect(ws_stream_->next_layer().next_layer(), res, ec);
+    if (ec) {
+        std::cerr << "Error connecting to WebSocket server: " << ec.message() << std::endl;
+        return false;
+    }
+
+    // Perform the TLS handshake(based on the old-school SSL context)
+    ws_stream_->next_layer().handshake(net::ssl::stream_base::client, ec);
+    if (ec) {
+        std::cerr << "Error during TLS handshake: " << ec.message() << std::endl;
+        return false;
+    }
+
+    // TODO: check the server certificate, if needed
+    //SSL_set1_host(ssl, "stream.binance.com");
+    //ssl_ctx_.set_verify_mode(boost::asio::ssl::verify_peer);
+    //ssl_ctx_.set_default_verify_paths();
+
+    ws_stream_->set_option(websocket::stream_base::timeout::suggested(beast::role_type::client));
+
+    // Perform the WebSocket handshake
+    ws_stream_->handshake("stream.binance.com", "/ws", ec);
+    if (ec) {
+        std::cerr << "Error during WebSocket handshake: " << ec.message() << std::endl;
+        return false;
+    }
+
+    // Send a subscription message to the WebSocket server
+    std::string json_message = subscribeRequest(marketSymbols, marketIntervals);
+    std::cout << "Sending message: " << json_message << std::endl;
+    ws_stream_->write(net::buffer(json_message), ec);
+    if (ec) {
+        std::cerr << "Error sending subscription message: " << ec.message() << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+void BinanceDataSync::reset_websocket() {
+    beast::error_code ec;
+    if (ws_stream_) {
+        if (ws_stream_->is_open()) {
+            ws_stream_->close(websocket::close_code::normal, ec);
+            ec = {};
+        }
+
+        auto& tls_session = ws_stream_->next_layer();
+        auto& tcp_socket = ws_stream_->next_layer().next_layer();
+        
+        if (tcp_socket.is_open()) {
+            // close the underlying TLS stream
+            tls_session.shutdown(ec);
+            if (ec) {
+                std::cerr << "Error shutting down TLS stream: " << ec.message() << std::endl;
+            }
+
+            tcp_socket.shutdown(tcp::socket::shutdown_both, ec);
+            if (ec) {
+                std::cerr << "Error shutting down TCP socket: " << ec.message() << std::endl;
+            }
+
+            tcp_socket.close(ec);
+            if (ec) {
+                std::cerr << "Error closing TCP socket: " << ec.message() << std::endl;
+            }
+        }
+    }
+
+    // Reset the WebSocket stream
+    ws_stream_.reset(new WsStream(ioc_, ssl_ctx_));
+    std::cout << "WebSocket stream reset successfully. Ready to re-connect to server..." << std::endl;
 }
 
 void BinanceDataSync::asyncReadLoop(){
     auto self = shared_from_this();
-    ws_stream_.async_read(buffer_, [this, self](const boost::system::error_code& ec, std::size_t bytes_transferred){
-        if(ec){
-            std::cerr << "asyncReadLoop read error: " << ec.message() << std::endl;
-            // if failed, try to reconnect
-            scheduleReconnect();
-            return;
-        }
+    ws_stream_->async_read(
+        buffer_,
+        net::bind_executor(strand_,
+            [this, self](beast::error_code ec, std::size_t n) {  // self is used to keep the shared_ptr alive, add one more reference. otherwise, the shared_ptr may be destroyed before the callback is called.
+                if (ec) {
+                    // 1. scheduledReconnect has cancelled this operation, taken over by it so no need to reconnect
+                    if (ec == net::error::operation_aborted) return;
 
-        std::string message = beast::buffers_to_string(buffer_.data());
-        buffer_.consume(bytes_transferred);
+                    // 2. if the connection is closed by other reason, then reconnect
+                    if (!reconnecting_) {
+                        scheduleReconnect();
+                    }
+                    return; 
+                }
 
-        std::cout << "AsyncReadLoop received message: " << message << std::endl;
+                std::string msg = beast::buffers_to_string(buffer_.data());
+                
+                // buffer_.consume(n);
+                buffer_.consume(buffer_.size());
 
-        if(message.find("ping") != std::string::npos){
-            // Respond to the ping message
-            std::cout << "Received ping message: " << message << std::endl;
-            sendPong(message);
-        }else{
-            // Process the received market data
-            mkdsM.publishGlobalKlines(message);
-        }
+                // std::cout << "AsyncReadLoop received message: " << msg << std::endl;
 
-        // read from the stream
-        asyncReadLoop();
-    });
+                // Process the received market data
+                mkdsM.publishGlobalKlines(msg);
+
+                // read from the stream
+                asyncReadLoop();
+            }
+        )
+    );
 }
 
-void BinanceDataSync::sendPong(const std::string& ping_message) {
-    auto self = shared_from_this();
-    websocket::ping_data pong_data(ping_message);
-    ws_stream_.async_pong(pong_data, [this, self](beast::error_code ec) {
-        if (ec) {
-            std::cerr << "Pong error: " << ec.message() << std::endl;
-            scheduleReconnect();
-        }
-    });
-}
+void BinanceDataSync::scheduleReconnect() {
+    net::post(strand_, [this, self = shared_from_this()] {
+        if (reconnecting_) return;
+        reconnecting_ = true;
 
-void BinanceDataSync::scheduleReconnect(){
-    std::cerr << "Reconnecting to the WebSocket server in 5 seconds..." << std::endl;
-    auto self = shared_from_this();
-    reconnect_timer_.expires_after(std::chrono::seconds(5));
-    reconnect_timer_.async_wait([this, self](const boost::system::error_code& ec){
-        if(!ec){
-            connect();
-            asyncReadLoop();
-            return;
-        }else{
-            std::cerr << "scheduleReconnect reconnect timer error: " << ec.message() << std::endl;
+        // 1. stop ping timer
+        ping_running_ = false;
+        beast::error_code ec;
+        ping_timer_.cancel(ec);
+
+        // 2. close ws and cancel all the suspend I/O, an operation_aborted code will be returned
+        if (ws_stream_ && ws_stream_->is_open()) {
+            ws_stream_->async_close(websocket::close_code::normal,
+                net::bind_executor(strand_, [](beast::error_code) { /* quiet */ }));
         }
+
+        // 3. stop reconnect timer
+        ec = {};
+        reconnect_timer_.cancel(ec);
+        reconnect_timer_.expires_after(std::chrono::seconds(5));
+        reconnect_timer_.async_wait(
+            net::bind_executor(strand_,  // also put the reconnect operation in the strand
+                [this, self](beast::error_code tec) {
+                    reconnecting_ = false;
+                    if (tec == net::error::operation_aborted) return;
+                    if (!connect_noexcept()) { scheduleReconnect(); return; }
+                    startPing(); // restart the ping timer to keep the connection alive
+                    asyncReadLoop();
+                })
+        );
     });
 }
 
@@ -294,14 +385,20 @@ void BinanceDataSync::syncOneSymbol(std::string symbol, std::string interval, ui
 }
 
 std::vector<KlineResponseWs> BinanceDataSync::klineRestReq(std::string symbolUpperCase, std::string interval, std::string startTime, std::string endTime, std::string limitStr) {
+    // Important! Create a new io_context and SSL context for HTTP request
+    net::io_context http_ioc;
+    net::ssl::context http_ssl(net::ssl::context::tlsv12_client);
+
     // Set up HTTP request
-    beast::ssl_stream<tcp::socket> stream(ioc_, ssl_ctx_);
+    beast::ssl_stream<tcp::socket> stream(http_ioc, http_ssl);
     if (!SSL_set_tlsext_host_name(stream.native_handle(), "api.binance.com")) {
         beast::error_code ec{static_cast<int>(::ERR_get_error()), net::error::get_ssl_category()};
         throw beast::system_error{ec};
     }
 
-    auto const results = resolver_.resolve("api.binance.com", "https");
+    // New TCP resolver for the HTTP request
+    tcp::resolver resolver(http_ioc);
+    auto results = resolver.resolve("api.binance.com", "https");
     net::connect(stream.next_layer(), results.begin(), results.end());
     stream.handshake(net::ssl::stream_base::client);
 
@@ -348,4 +445,51 @@ std::vector<KlineResponseWs> BinanceDataSync::klineRestReq(std::string symbolUpp
         std::cerr << "Failed to fetch klines. Status code: " << res.result_int() << std::endl;
         return std::vector<KlineResponseWs>();
     }
+}
+
+void BinanceDataSync::startPing() {
+    // put the ping operation in the strand to ensure it runs in the correct order
+    net::post(strand_, [this, self = shared_from_this()] {
+        if (ping_running_) return;
+        ping_running_ = true;
+        scheduleNextPing();
+        });
+}
+
+void BinanceDataSync::stopPing() {
+    net::post(strand_, [this, self = shared_from_this()] {
+        ping_running_ = false;
+        beast::error_code ec;
+        ping_timer_.cancel(ec); // stop the ping timer
+        });
+}
+
+// heart beat for the WebSocket connection
+void BinanceDataSync::scheduleNextPing() {
+    if (!ping_running_ || reconnecting_) return;          // reconnecting or ping not used, then do not schedule next ping
+    if (!ws_stream_ || !ws_stream_->is_open()) return;    // no ws or ws not open, then do not schedule next ping
+
+    ping_timer_.expires_after(ping_interval_);
+    ping_timer_.async_wait(
+        net::bind_executor(strand_,
+            [this, self = shared_from_this()](beast::error_code ec) {
+                if (!ping_running_) return;
+                if (ec == net::error::operation_aborted) return;
+                if (!ws_stream_ || !ws_stream_->is_open()) return;
+
+                ws_stream_->async_ping(websocket::ping_data{},
+                    net::bind_executor(strand_,
+                        [this, self](beast::error_code pec) {
+                            if (!ping_running_) return;
+                            if (pec == net::error::operation_aborted || pec == websocket::error::closed) return;
+                            if (pec) {
+                                // reconnect if ping failed
+                                scheduleReconnect();
+                                return;
+                            }
+                            scheduleNextPing();
+                        })
+                );
+            })
+    );
 }

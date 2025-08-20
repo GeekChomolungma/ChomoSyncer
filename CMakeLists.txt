@@ -67,6 +67,13 @@ list(APPEND SOURCES ${SRC_FILES})
 
 # Add source to this project's executable.
 add_executable(ChomoSyncer ${SOURCES})
+if(MSVC)
+    # for windows compilers, we need to set the /bigobj flag to allow large object files
+    target_compile_options(ChomoSyncer PRIVATE /bigobj)
+    
+    # if that not works, uncomment the next line
+    # target_compile_options(ChomoSyncer PRIVATE /Gy-)
+endif()
 
 # for config file
 configure_file(

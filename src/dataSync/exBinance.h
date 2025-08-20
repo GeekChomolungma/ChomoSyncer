@@ -2,6 +2,7 @@
 #include <iomanip>  // for std::put_time
 #include <ctime>    // for std::tm, std::localtime
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <thread>
 #include <chrono>
@@ -21,33 +22,41 @@
 
 // when subscribe a multi combined streams in binance，payload will be like {"stream":"<streamName>","data":<rawPayload>}
 // but for kline, it is received one by one even in multi streams
-using tcp = boost::asio::ip::tcp;
 namespace net = boost::asio;
 namespace beast = boost::beast;
 namespace http = beast::http;
 namespace websocket = beast::websocket;
 
+using tcp = boost::asio::ip::tcp;
+using WsStream = boost::beast::websocket::stream<boost::beast::ssl_stream<boost::asio::ip::tcp::socket>>;
+
 // Class for handling Binance data synchronization
 class BinanceDataSync : public std::enable_shared_from_this<BinanceDataSync>{
 public:
     BinanceDataSync(const std::string& iniConfig);
-
     void start();
 
-    void handle_market_data_subscribe();
-        
-    void handle_data_persistence();
+    // WS Ping/Pong
+    void startPing();
+    void stopPing();
+    void scheduleNextPing();
     
+    // Handle history market data synchronization
     void handle_history_market_data_sync();
+
+    // Handle incoming WebSocket messages
+    void handle_market_data_subscribe();
+    
+    // Handle data persistence
+    void handle_data_persistence();
 
 private:
     std::string subscribeRequest(const std::vector<std::string>& symbol, const std::vector<std::string>& interval);
 
-    void connect();
+    bool connect_noexcept();
+    void reset_websocket();
 
     void asyncReadLoop();
-
-    void sendPong(const std::string& ping_message);
 
     void scheduleReconnect();
 
@@ -85,10 +94,23 @@ private:
     // io_context and resolver for asynchronous operations,
     // Could be used in data sync's Multi-Connection-One-Thread model
     net::io_context ioc_;
-    net::executor_work_guard<net::io_context::executor_type> work_guard_; // keep io_context running
-    tcp::resolver resolver_;
     net::ssl::context ssl_ctx_;
+    net::executor_work_guard<net::io_context::executor_type> work_guard_; // block io_context.run() to keep io_context working all the time
+
+    // WS Ping/Pong
+    net::steady_timer ping_timer_;
+    bool ping_running_ = false;
+    std::chrono::seconds ping_interval_{ std::chrono::minutes(10) };
+
+    // ensure all operations are executed in the same thread
+    // Although io_context only run in one thread, we still use strand to ensure all operations are executed in the same order
+    // Meanwhile, in the future, when we expand the run threads to multi-threads, strand will ensure the operations are executed in the same order
+    net::strand<net::io_context::executor_type> strand_;                  
+
+    tcp::resolver resolver_;
     beast::flat_buffer buffer_;
-    websocket::stream<beast::ssl_stream<tcp::socket>> ws_stream_;
+
+    std::unique_ptr<WsStream> ws_stream_;
     net::steady_timer reconnect_timer_;
+    bool reconnecting_ = false;
 };
