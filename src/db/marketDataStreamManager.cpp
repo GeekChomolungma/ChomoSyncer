@@ -43,7 +43,8 @@ void MarketDataStreamManager::publishMarketData(const std::string& asset, const 
 
         // trim the symbol stream to keep the latest 10000 messages
         std::cout << "Trimming stream " << streamName << " to keep the latest 10000 messages." << std::endl;
-        redisCommand(redisContextConsumer, "XTRIM %s MAXLEN ~ %d", streamName.c_str(), 10000);
+        // redisCommand(redisContextConsumer, "XTRIM %s MAXLEN ~ %d", streamName.c_str(), 10000);
+        auto trim = exec(redisContextConsumer, "XTRIM %s MAXLEN ~ %d", streamName.c_str(), 10000);
     }
 }
 
@@ -119,11 +120,19 @@ std::vector<KlineResponseWs> MarketDataStreamManager::fetchGlobalKlinesAndDispat
                     // first resp maybe like {"result":null,"id":1}
                     auto result = j.find("result");
                     if (result != j.end() && result->is_null()) {
-                        redisCommand(redisContextConsumer, "XACK %s %s %s", GLOBAL_KLINES_STREAM.c_str(), GLOBAL_KLINES_GROUP.c_str(), messageId.c_str());
+                        // redisCommand(redisContextConsumer, "XACK %s %s %s", GLOBAL_KLINES_STREAM.c_str(), GLOBAL_KLINES_GROUP.c_str(), messageId.c_str());
+                        auto ack = exec(redisContextConsumer, "XACK %s %s %s", GLOBAL_KLINES_STREAM.c_str(), GLOBAL_KLINES_GROUP.c_str(), messageId.c_str());
                         continue;
                     }
                 } catch (const std::exception& e) {
                     std::cerr << "Error deserializing message: " << e.what() << std::endl;
+
+                    // free the reply object
+                    if (reply != nullptr) {
+                        freeReplyObject(reply);
+                        reply = nullptr;
+                    }
+
                     return finalklines;
                 }
 
@@ -136,6 +145,13 @@ std::vector<KlineResponseWs> MarketDataStreamManager::fetchGlobalKlinesAndDispat
                 catch(const std::exception& e)
                 {
                     std::cerr << e.what() << '\n';
+
+                    // free the reply object
+                    if (reply != nullptr) {
+                        freeReplyObject(reply);
+                        reply = nullptr;
+                    }
+
                     return finalklines;
                 }  
                 
@@ -153,7 +169,8 @@ std::vector<KlineResponseWs> MarketDataStreamManager::fetchGlobalKlinesAndDispat
                     
                     // step 4: ack the message
                     // acknowledgeMessage(GLOBAL_KLINES_STREAM, GLOBAL_KLINES_GROUP, messageId);
-                    redisCommand(redisContextConsumer, "XACK %s %s %s", GLOBAL_KLINES_STREAM.c_str(), GLOBAL_KLINES_GROUP.c_str(), messageId.c_str());
+                    // redisCommand(redisContextConsumer, "XACK %s %s %s", GLOBAL_KLINES_STREAM.c_str(), GLOBAL_KLINES_GROUP.c_str(), messageId.c_str());
+                    auto ack = exec(redisContextConsumer, "XACK %s %s %s", GLOBAL_KLINES_STREAM.c_str(), GLOBAL_KLINES_GROUP.c_str(), messageId.c_str());
                 }
                 catch(const std::exception& e)
                 {
@@ -161,13 +178,17 @@ std::vector<KlineResponseWs> MarketDataStreamManager::fetchGlobalKlinesAndDispat
                     continue;
                 }
             }
-            freeReplyObject(reply);
-            reply = nullptr;
+
+            if (reply != nullptr) {
+                freeReplyObject(reply);
+                reply = nullptr;
+            }
         }
 
         // step 5: trim the stream
         std::cout << "Trimming global klines stream to keep the latest 10000 messages." << std::endl;
-        redisCommand(redisContextConsumer, "XTRIM %s MAXLEN ~ %d", GLOBAL_KLINES_STREAM.c_str(), 10000);
+        // redisCommand(redisContextConsumer, "XTRIM %s MAXLEN ~ %d", GLOBAL_KLINES_STREAM.c_str(), 10000);
+        auto trim = exec(redisContextConsumer, "XTRIM %s MAXLEN ~ %d", GLOBAL_KLINES_STREAM.c_str(), 10000);
     }
 
     if (reply != nullptr) {
@@ -212,7 +233,8 @@ std::string MarketDataStreamManager::consumeData(const std::string& asset, const
 void MarketDataStreamManager::acknowledgeMessage(const std::string& asset, const std::string& timeframe, const std::string& messageId) {
     if (redisContextConsumer) {
         std::string streamName = asset + "-" + timeframe + "-stream";
-        redisCommand(redisContextConsumer, "XACK %s %s %s", streamName.c_str(), (asset + "-group").c_str(), messageId.c_str());
+        // redisCommand(redisContextConsumer, "XACK %s %s %s", streamName.c_str(), (asset + "-group").c_str(), messageId.c_str());
+        auto ack = exec(redisContextConsumer, "XACK %s %s %s", streamName.c_str(), (asset + "-group").c_str(), messageId.c_str());
     }
 }
 
@@ -222,38 +244,86 @@ void MarketDataStreamManager::persistData() {
     std::cout << "Persisting data to MongoDB..." << std::endl;
 }
 
-// Private Helper Methods
+//// Private Helper Methods
+//void MarketDataStreamManager::connectToRedis() {
+//    redisContextProducer = redisConnect(redisHost.c_str(), redisPort);
+//    if (redisContextProducer == nullptr || redisContextProducer->err) {
+//        std::cerr << "Producer connection error: " << (redisContextProducer ? redisContextProducer->errstr : "can't allocate redis context") << std::endl;
+//    }
+//
+//    // auth redis
+//    if (!redisPassword.empty()) {
+//        redisReply* reply = (redisReply*)redisCommand(redisContextProducer, "AUTH %s", redisPassword.c_str());
+//        if (reply == nullptr || redisContextProducer->err) {
+//            std::cerr << "Producer authentication failed: " << (redisContextProducer->errstr ? redisContextProducer->errstr : "Unknown error") << std::endl;
+//            redisFree(redisContextProducer);
+//            redisContextProducer = nullptr;
+//        }
+//        freeReplyObject(reply);
+//    }
+//
+//    redisContextConsumer = redisConnect(redisHost.c_str(), redisPort);
+//    if (redisContextConsumer == nullptr || redisContextConsumer->err) {
+//        std::cerr << "Consumer connection error: " << (redisContextConsumer ? redisContextConsumer->errstr : "can't allocate redis context") << std::endl;
+//    }
+//
+//    if (!redisPassword.empty()) {
+//        redisReply* reply = (redisReply*)redisCommand(redisContextConsumer, "AUTH %s", redisPassword.c_str());
+//        if (reply == nullptr || redisContextConsumer->err) {
+//            std::cerr << "Consumer authentication failed: " << (redisContextConsumer->errstr ? redisContextConsumer->errstr : "Unknown error") << std::endl;
+//            redisFree(redisContextConsumer);
+//            redisContextConsumer = nullptr;
+//        }
+//        freeReplyObject(reply);
+//    }
+//}
+
 void MarketDataStreamManager::connectToRedis() {
-    redisContextProducer = redisConnect(redisHost.c_str(), redisPort);
-    if (redisContextProducer == nullptr || redisContextProducer->err) {
-        std::cerr << "Producer connection error: " << (redisContextProducer ? redisContextProducer->errstr : "can't allocate redis context") << std::endl;
-    }
+    // --- 0) clean the history context ---
+    if (redisContextProducer) { redisFree(redisContextProducer); redisContextProducer = nullptr; }
+    if (redisContextConsumer) { redisFree(redisContextConsumer); redisContextConsumer = nullptr; }
 
-    // auth redis
-    if (!redisPassword.empty()) {
-        redisReply* reply = (redisReply*)redisCommand(redisContextProducer, "AUTH %s", redisPassword.c_str());
-        if (reply == nullptr || redisContextProducer->err) {
-            std::cerr << "Producer authentication failed: " << (redisContextProducer->errstr ? redisContextProducer->errstr : "Unknown error") << std::endl;
-            redisFree(redisContextProducer);
-            redisContextProducer = nullptr;
+    auto connect_and_auth = [&](redisContext*& ctx, const char* tag) -> bool {
+        // 1) connect redis
+        ctx = redisConnect(redisHost.c_str(), redisPort);
+        if (!ctx || ctx->err) {
+            std::cerr << tag << " connection error: "
+                << (ctx && ctx->errstr ? ctx->errstr : "can't allocate redis context")
+                << std::endl;
+            if (ctx) { redisFree(ctx); ctx = nullptr; }
+            return false;
         }
-        freeReplyObject(reply);
-    }
 
-    redisContextConsumer = redisConnect(redisHost.c_str(), redisPort);
-    if (redisContextConsumer == nullptr || redisContextConsumer->err) {
-        std::cerr << "Consumer connection error: " << (redisContextConsumer ? redisContextConsumer->errstr : "can't allocate redis context") << std::endl;
-    }
+        // 2) auth
+        if (!redisPassword.empty()) {
+            ReplyUPtr reply{ static_cast<redisReply*>(
+                redisCommand(ctx, "AUTH %s", redisPassword.c_str()))
+            };
 
-    if (!redisPassword.empty()) {
-        redisReply* reply = (redisReply*)redisCommand(redisContextConsumer, "AUTH %s", redisPassword.c_str());
-        if (reply == nullptr || redisContextConsumer->err) {
-            std::cerr << "Consumer authentication failed: " << (redisContextConsumer->errstr ? redisContextConsumer->errstr : "Unknown error") << std::endl;
-            redisFree(redisContextConsumer);
-            redisContextConsumer = nullptr;
+            // when reply is nullptr, or ctx has an error, or reply is an error type
+            if (!reply || (ctx && ctx->err) || reply->type == REDIS_REPLY_ERROR) {
+                std::cerr << tag << " authentication failed: "
+                    << (ctx && ctx->errstr ? ctx->errstr : "Unknown error")
+                    << std::endl;
+                if (ctx) { redisFree(ctx); ctx = nullptr; }
+                return false;
+            }
+
+            // some redis server return "OK" as status, some return "OK" as string
+            if (reply->type == REDIS_REPLY_STATUS) {
+                if (!(reply->str && std::string(reply->str) == "OK")) {
+                    std::cerr << tag << " AUTH unexpected status: "
+                        << (reply->str ? reply->str : "(null)") << std::endl;
+                }
+            }
         }
-        freeReplyObject(reply);
-    }
+
+        return true;
+        };
+
+    // Producer & Consumer setup
+    (void)connect_and_auth(redisContextProducer, "Producer");
+    (void)connect_and_auth(redisContextConsumer, "Consumer");
 }
 
 void MarketDataStreamManager::disconnectFromRedis() {
@@ -280,6 +350,7 @@ void MarketDataStreamManager::createConsumerGroup(const std::string& asset, cons
 void MarketDataStreamManager::trimStream(const std::string& asset, const std::string& timeframe) {
     if (redisContextProducer) {
         std::string streamName = asset + "-" + timeframe + "-stream";
-        redisCommand(redisContextProducer, "XTRIM %s MAXLEN ~ 1000", streamName.c_str());
+        // redisCommand(redisContextProducer, "XTRIM %s MAXLEN ~ 1000", streamName.c_str());
+        auto trim = exec(redisContextProducer, "XTRIM %s MAXLEN ~ %d", streamName.c_str(), 10000);
     }
 }

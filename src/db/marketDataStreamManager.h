@@ -19,6 +19,9 @@
 //     ]]
 // ]
 
+struct RedisReplyDeleter { void operator()(redisReply* r) const { if (r) freeReplyObject(r); } };
+using ReplyUPtr = std::unique_ptr<redisReply, RedisReplyDeleter>;
+
 // A Redis wrapper class for managing market data streams
 class MarketDataStreamManager {
 public:
@@ -41,6 +44,14 @@ public:
 
 private:
     // Private Helper Methods
+
+    inline ReplyUPtr exec(redisContext* ctx, const char* fmt, ...) {
+        va_list ap; va_start(ap, fmt);
+        redisReply* raw = (redisReply*)redisvCommand(ctx, fmt, ap);
+        va_end(ap);
+        return ReplyUPtr(raw);
+    }
+
     void connectToRedis();
     void disconnectFromRedis();
     void createConsumerGroup(const std::string& asset, const std::string& timeframe);
