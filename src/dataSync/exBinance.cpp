@@ -258,7 +258,10 @@ void BinanceDataSync::asyncReadLoop(){
             [this, self](beast::error_code ec, std::size_t n) {  // self is used to keep the shared_ptr alive, add one more reference. otherwise, the shared_ptr may be destroyed before the callback is called.
                 if (ec) {
                     // 1. scheduledReconnect has cancelled this operation, taken over by it so no need to reconnect
-                    if (ec == net::error::operation_aborted) return;
+                    if (ec == net::error::operation_aborted) {
+                        std::cerr << "WS read ended: " << ec.message() << std::endl;
+                        return;
+                    }
 
                     // 2. if the connection is closed by other reason, then reconnect
                     if (!reconnecting_) {
@@ -283,6 +286,12 @@ void BinanceDataSync::asyncReadLoop(){
         )
     );
 }
+
+// TODO:
+// 1. Silent packet loss: when DROP packets, the server will not send any error message, so we need to handle this case. 
+//    Use watchdog to detect the connection status?
+// 2. Important! History data sync: 
+//    when the connection is lost for a long time, we need to re-sync the history data for all symbols and intervals
 
 void BinanceDataSync::scheduleReconnect() {
     net::post(strand_, [this, self = shared_from_this()] {
