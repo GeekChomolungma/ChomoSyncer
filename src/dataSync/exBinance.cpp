@@ -247,11 +247,18 @@ void BinanceDataSync::reset_websocket() {
                 std::cerr << "Error closing TCP socket: " << ec.message() << std::endl;
             }
         }
+        std::cout << "WebSocket stream reset successfully. Ready to re-connect to server..." << std::endl;
     }
+    else {
+        std::cout << "WebSocket stream is not initialized, creating a new one..." << std::endl;
+    }
+    
+    // Clear the buffer, avoiding buffer left across the multi connections
+    buffer_.consume(buffer_.size());
 
     // Reset the WebSocket stream
     ws_stream_.reset(new WsStream(ioc_, ssl_ctx_));
-    std::cout << "WebSocket stream reset successfully. Ready to re-connect to server..." << std::endl;
+    
 }
 
 void BinanceDataSync::asyncReadLoop(){
@@ -261,6 +268,9 @@ void BinanceDataSync::asyncReadLoop(){
         net::bind_executor(strand_,
             [this, self](beast::error_code ec, std::size_t n) {  // self is used to keep the shared_ptr alive, add one more reference. otherwise, the shared_ptr may be destroyed before the callback is called.
                 if (ec) {
+                    // 0. clear the buffer!!!
+                    buffer_.consume(buffer_.size());
+
                     // 1. scheduledReconnect has cancelled this operation, taken over by it so no need to reconnect
                     if (ec == net::error::operation_aborted) {
                         std::cerr << "WS read ended: " << ec.message() << std::endl;
