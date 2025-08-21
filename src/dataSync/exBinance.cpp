@@ -132,7 +132,11 @@ void BinanceDataSync::handle_history_market_data_sync() {
     catch(const std::exception& e) {
         std::cerr << "handle_history_market_data_sync error: " << e.what() << std::endl;
     }
+}
 
+void BinanceDataSync::handle_history_gap_fill() {
+    std::cout << "Start gap fill" << std::endl;
+    handle_history_market_data_sync();
 }
 
 std::string BinanceDataSync::subscribeRequest(const std::vector<std::string>& symbol, const std::vector<std::string>& interval) {
@@ -321,7 +325,17 @@ void BinanceDataSync::scheduleReconnect() {
                     if (!connect_noexcept()) { scheduleReconnect(); return; }
                     startPing(); // restart the ping timer to keep the connection alive
                     asyncReadLoop();
-                })
+
+                    // history Klines gap fill
+                    std::thread([this] {
+                        // atomic flag
+                        if (gapfill_running_.exchange(true)) return;
+                        handle_history_gap_fill();
+                        gapfill_running_ = false;
+                    }).detach();
+
+                }
+            )
         );
     });
 }
@@ -345,7 +359,7 @@ void BinanceDataSync::syncOneSymbol(std::string symbol, std::string interval, ui
         int64_t nextStartMs = (startTime == 0) ? HARDCODE_KLINE_SYNC_START : (endTime + 1);
 
         // from milliseconds to seconds
-        std::time_t time_sec = startTime / 1000;
+        std::time_t time_sec = nextStartMs / 1000;
         // transform to std::tm structure
         std::tm* tm_ptr = std::gmtime(&time_sec);  // utc
 

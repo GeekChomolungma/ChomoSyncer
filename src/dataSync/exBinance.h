@@ -43,6 +43,7 @@ public:
     
     // Handle history market data synchronization
     void handle_history_market_data_sync();
+    void handle_history_gap_fill(); // same as handle_history_market_data_sync, but for gap fill
 
     // Handle incoming WebSocket messages
     void handle_market_data_subscribe();
@@ -99,7 +100,6 @@ private:
 
     // WS Ping/Pong
     net::steady_timer ping_timer_;
-    bool ping_running_ = false;
     std::chrono::seconds ping_interval_{ std::chrono::minutes(10) };
 
     // ensure all operations are executed in the same thread
@@ -109,8 +109,11 @@ private:
 
     tcp::resolver resolver_;
     beast::flat_buffer buffer_;
-
     std::unique_ptr<WsStream> ws_stream_;
     net::steady_timer reconnect_timer_;
+
+    // some flags
+    std::atomic_bool gapfill_running_{ false };
+    bool ping_running_ = false;
     bool reconnecting_ = false;
 };
