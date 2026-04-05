@@ -98,7 +98,7 @@ def compute_rsi_cpp_style(df_k: pd.DataFrame, period: int = 14) -> pd.DataFrame:
 def main():
     # ==== Parameters ====
     period = 14
-    symbol = "BTCUSDT"
+    symbol = "BNBUSDT"
     interval = "15m"
     outlier_eps = 1e-6   # You can also adjust to 1e-3/1e-2 for rough consistency
     start_ms = None

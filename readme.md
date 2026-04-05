@@ -13,6 +13,19 @@ ChomoSyncer is a high-performance market data synchronizer for Binance. It retri
 * **Multi-timeframe support**: Handles multiple intervals such as 1m, 15m, 1h, and 4h simultaneously.
 * **Data distribution & persistence**: Uses Redis Stream for real-time data distribution and MongoDB for long-term storage.
 
+## Dataset
+
+In addition to real-time data synchronization, this repository also provides a pre-collected cryptocurrency dataset used in research and backtesting.
+
+- **Kline dataset (historical data):**  
+  https://drive.google.com/file/d/11J7LR7qp3cVVwsJgQmsWuiw3Tge-QVFV/view
+
+### Notes
+
+- The dataset is provided under exchange data usage terms.
+- For the most up-to-date data, users are encouraged to run ChomoSyncer directly 
+  to collect real-time data from Binance.
+
 ## Quick Start
 
 ```bash
