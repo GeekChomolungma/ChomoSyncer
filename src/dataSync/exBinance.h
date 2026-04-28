@@ -17,7 +17,6 @@
 
 #include "db/marketDataStreamManager.h"
 #include "db/mongoManager.h"
-#include "ta/indicator_manager.h"
 #include "config/config.h"
 
 // when subscribe a multi combined streams in binance，payload will be like {"stream":"<streamName>","data":<rawPayload>}
@@ -83,7 +82,6 @@ private:
     Config cfg;
     MarketDataStreamManager mkdsM;
     MongoManager mongoM;
-    IndicatorManager indicatorM;
 
     std::vector<std::string> marketSymbols;
     std::vector<std::string> marketIntervals;

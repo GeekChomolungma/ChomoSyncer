@@ -1,7 +1,7 @@
 #include "exBinance.h"
 
 const std::string DB_MARKETINFO = "market_info";
-const uint64_t HARDCODE_KLINE_SYNC_START = 1690840800000;  // 2023-08-01 00:00:00 UTC+8
+const uint64_t HARDCODE_KLINE_SYNC_START = 1577808000; //2020-01-01 00:00:00 //1690840800000; =  2023-08-01 00:00:00 UTC+8
 
 void printHumanReadableTime(int64_t timestamp_ms) {
     // from milliseconds to seconds
@@ -22,8 +22,7 @@ BinanceDataSync::BinanceDataSync(const std::string& iniConfig) :
     reconnect_timer_(ioc_), ping_timer_(ioc_), strand_(ioc_.get_executor()),
     cfg(iniConfig),
     mkdsM(cfg.getRedisHost(), cfg.getRedisPort(), cfg.getRedisPassword()),
-    mongoM(cfg.getDatabaseUri()),
-    indicatorM(mongoM)
+    mongoM(cfg.getDatabaseUri())
 {      
     ws_stream_ = std::make_unique<WsStream>(ioc_, ssl_ctx_);
 
@@ -35,12 +34,6 @@ BinanceDataSync::BinanceDataSync(const std::string& iniConfig) :
 }
 
 void BinanceDataSync::start() {
-    // setup indicator manager, load indicators from config, and prepare for each symbol and interval
-    indicatorM.loadIndicators(marketSymbols, marketIntervals);
-
-    // load the latest indicator states from MongoDB (hot start)
-    indicatorM.loadStates(DB_MARKETINFO, marketSymbols, marketIntervals, 20);
-
     // start threads for history market data sync
     handle_history_market_data_sync();
 
@@ -97,18 +90,11 @@ void BinanceDataSync::handle_data_persistence() {
             klinesBySymbolInterval[key].push_back(k);
         }
 
-        // step 2: update indicators for each symbol and interval
+        // step 2: write closed klines to MongoDB by symbol and interval
         for (auto& [key, vec] : klinesBySymbolInterval) {
             std::sort(vec.begin(), vec.end(),
                 [](auto& a, auto& b) { return a.StartTime < b.StartTime; });
 
-            // step 3: process each kline and update indicators
-            for (auto& ws : vec) {
-                Kline k = KlineResponseWs::toKline(ws);
-                indicatorM.processNewKline(k);
-            }
-
-            // step 4: write closed klines to MongoDB
             mongoM.WriteClosedKlines(DB_MARKETINFO, vec);
         }
     }
@@ -357,9 +343,6 @@ void BinanceDataSync::syncOneSymbol(std::string symbol, std::string interval, ui
     std::string limitStr = oss.str();
     std::string upperCaseSymbol(symbol);
     std::transform(upperCaseSymbol.begin(), upperCaseSymbol.end(), upperCaseSymbol.begin(), ::toupper);
-       
-    //// Prepare the indicator manager for this symbol and interval
-    //indicatorM.prepare(DB_MARKETINFO, upperCaseSymbol, interval, 20); // pre-retrieve history klines for indicators
 
     while(true){
         // check start time from mongo lasted kline
@@ -395,8 +378,6 @@ void BinanceDataSync::syncOneSymbol(std::string symbol, std::string interval, ui
                 std::cout << "Processing non-final kline: " << klineInst.StartTime << " for " << upperCaseSymbol << "_" << interval << std::endl;
                 continue;
             }
-            
-            indicatorM.processNewKline(klineInst);
             KlinesToBeWritten_ws.push_back(kline_ws); // make sure non-final out
         }
 
