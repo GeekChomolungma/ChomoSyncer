@@ -37,6 +37,12 @@ void BinanceDataSync::start() {
     // start threads for history market data sync
     handle_history_market_data_sync();
 
+    // Run one more catch-up pass before websocket subscription. During a long initial
+    // history sync, fast symbols/intervals may finish early and then wait for slower
+    // ones; this pass fills that short waiting window before live data starts.
+    std::cout << "Start final history market data catch-up before subscribe." << std::endl;
+    handle_history_gap_fill();
+
     // start two threads for market data subscribe and data persistence
     std::cout << "Start two threads for market data subscribe and data persistence." << std::endl;
 
