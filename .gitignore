@@ -3,6 +3,8 @@
 .vscode/
 out/
 build/
+build-old/
+logs/
 
 src/validation/env/
 src/validation/__pycache__/

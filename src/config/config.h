@@ -1,5 +1,9 @@
-﻿#include <iostream>
+﻿#pragma once
+
+#include <iostream>
 #include <sstream>
+#include <string>
+#include <vector>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/ini_parser.hpp>
 
@@ -57,6 +61,18 @@ public:
         }
 
         return tokens;
+    }
+
+    std::string getLogDir() const {
+        return pt.get<std::string>("logging.dir", "logs");
+    }
+
+    uint64_t getLogMaxFileSizeMb() const {
+        return pt.get<uint64_t>("logging.max_file_size_mb", 1024);
+    }
+
+    uint64_t getHistoryKlineSyncStartMs() const {
+        return pt.get<uint64_t>("history.kline_sync_start_ms", 0);
     }
 
 private:

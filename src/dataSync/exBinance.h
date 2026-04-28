@@ -85,6 +85,7 @@ private:
 
     std::vector<std::string> marketSymbols;
     std::vector<std::string> marketIntervals;
+    uint64_t historyKlineSyncStartMs = 0;
 
     std::chrono::steady_clock::time_point last_persist_time;
     const size_t BATCH_SIZE = 100;

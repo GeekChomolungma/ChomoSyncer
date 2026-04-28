@@ -1,7 +1,6 @@
 #include "exBinance.h"
 
 const std::string DB_MARKETINFO = "market_info";
-const uint64_t HARDCODE_KLINE_SYNC_START = 1577808000; //2020-01-01 00:00:00 //1690840800000; =  2023-08-01 00:00:00 UTC+8
 
 void printHumanReadableTime(int64_t timestamp_ms) {
     // from milliseconds to seconds
@@ -31,6 +30,7 @@ BinanceDataSync::BinanceDataSync(const std::string& iniConfig) :
     auto mongoUri = cfg.getDatabaseUri();
     marketSymbols = cfg.getMarketSubInfo("marketsub.symbols");
     marketIntervals = cfg.getMarketSubInfo("marketsub.intervals");
+    historyKlineSyncStartMs = cfg.getHistoryKlineSyncStartMs();
 }
 
 void BinanceDataSync::start() {
@@ -349,7 +349,7 @@ void BinanceDataSync::syncOneSymbol(std::string symbol, std::string interval, ui
         int64_t startTime = 0;
         int64_t endTime = 0;
         mongoM.GetLatestSyncedTime(DB_MARKETINFO, upperCaseSymbol + "_" + interval + "_Binance", startTime, endTime);
-        int64_t nextStartMs = (startTime == 0) ? HARDCODE_KLINE_SYNC_START : (endTime + 1);
+        int64_t nextStartMs = (startTime == 0) ? historyKlineSyncStartMs : (endTime + 1);
 
         // from milliseconds to seconds
         std::time_t time_sec = nextStartMs / 1000;
